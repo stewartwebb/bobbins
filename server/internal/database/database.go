@@ -3,7 +3,9 @@ package database
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,24 +39,30 @@ func GetDB() *gorm.DB {
 }
 
 func connect() (*gorm.DB, error) {
-	host := getEnv("DB_HOST", "localhost")
-	port := getEnv("DB_PORT", "5435")
-	user := getEnv("DB_USER", "postgres")
-	password := getEnv("DB_PASSWORD", "postgres")
-	name := getEnv("DB_NAME", "bafachat")
-	sslMode := getEnv("DB_SSLMODE", "disable")
 	timezone := getEnv("DB_TIMEZONE", "UTC")
 
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		host,
-		port,
-		user,
-		password,
-		name,
-		sslMode,
-		timezone,
-	)
+	dsn, ok := os.LookupEnv("DATABASE_URL")
+	if !ok || dsn == "" {
+		host := getEnv("DB_HOST", "localhost")
+		port := getEnv("DB_PORT", "5435")
+		user := getEnv("DB_USER", "postgres")
+		password := getEnv("DB_PASSWORD", "postgres")
+		name := getEnv("DB_NAME", "bafachat")
+		sslMode := getEnv("DB_SSLMODE", "disable")
+
+		dsn = fmt.Sprintf(
+			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
+			host,
+			port,
+			user,
+			password,
+			name,
+			sslMode,
+			timezone,
+		)
+	} else if !hasTimezone(dsn) {
+		dsn = appendTimezone(dsn, timezone)
+	}
 
 	config := &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
@@ -96,4 +104,48 @@ func getEnv(key, fallback string) string {
 	}
 
 	return value
+}
+
+func hasTimezone(dsn string) bool {
+	lower := strings.ToLower(dsn)
+	if strings.Contains(lower, "timezone=") {
+		return true
+	}
+
+	if strings.Contains(dsn, "://") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			return false
+		}
+		query := parsed.Query()
+		if query.Get("TimeZone") != "" || query.Get("timezone") != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func appendTimezone(dsn, timezone string) string {
+	if strings.Contains(dsn, "://") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			return dsn
+		}
+
+		query := parsed.Query()
+		if query.Get("TimeZone") == "" && query.Get("timezone") == "" {
+			query.Set("timezone", timezone)
+			parsed.RawQuery = query.Encode()
+		}
+
+		return parsed.String()
+	}
+
+	trimmed := strings.TrimSpace(dsn)
+	if trimmed == "" {
+		return fmt.Sprintf("TimeZone=%s", timezone)
+	}
+
+	return fmt.Sprintf("%s TimeZone=%s", trimmed, timezone)
 }
