@@ -207,12 +207,16 @@ func appendSearchPath(dsn, schema string) string {
 }
 
 func ensureSchemaExists(db *gorm.DB, schema string) error {
+	return nil
+	
+	/*
 	if schema == "" {
 		return nil
 	}
 
 	stmt := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(schema))
 	return db.Exec(stmt).Error
+	*/
 }
 
 func formatSchemaForSearchPath(schema string) string {
