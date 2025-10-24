@@ -1,0 +1,49 @@
+{
+  "name": "bafachat",
+  "version": "1.0.0",
+  "description": "A Discord alternative with Go backend and React frontend",
+  "private": true,
+  "workspaces": [
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run services:start && concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && go run main.go",
+    "dev:client": "cd client && npm start",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "cd client && npm run build",
+    "build:server": "cd server && go build -o ../dist/server main.go",
+    "install:client": "cd client && npm install",
+    "install:server": "cd server && go mod tidy",
+    "setup": "npm run install:client && npm run install:server",
+    "db:start": "sh -c \"docker start bafachat-postgres >/dev/null 2>&1 || docker run --name bafachat-postgres -e POSTGRES_DB=bafachat -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5435:5432 -d postgres:16\"",
+    "redis:start": "sh -c \"docker start bafachat-redis >/dev/null 2>&1 || docker run --name bafachat-redis -p 6379:6379 -d redis:7-alpine\"",
+    "services:start": "npm run db:start && npm run redis:start",
+    "test": "npm run test:client && npm run test:server",
+    "test:client": "cd client && npm test",
+    "test:server": "cd server && go test ./...",
+    "clean": "rm -rf dist && cd client && rm -rf build node_modules && cd ../server && go clean"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/bafachat.git"
+  },
+  "keywords": [
+    "chat",
+    "discord",
+    "real-time",
+    "websocket",
+    "go",
+    "react",
+    "typescript"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
