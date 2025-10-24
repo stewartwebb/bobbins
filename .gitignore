@@ -19,8 +19,6 @@ client/dist
 .env.production.local
 
 # Go specific
-*.mod
-*.sum
 vendor/
 
 # IDE
