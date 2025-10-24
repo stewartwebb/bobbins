@@ -214,22 +214,6 @@ func appendSearchPath(dsn, schema string) string {
 }
 
 func ensureSchemaExists(db *gorm.DB, schema string) error {
-	if schema == "" {
-		return nil
-	}
-
-	parts := schemaList(schema)
-	for _, part := range parts {
-		if strings.EqualFold(part, "public") {
-			continue
-		}
-
-		stmt := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(part))
-		if err := db.Exec(stmt).Error; err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
