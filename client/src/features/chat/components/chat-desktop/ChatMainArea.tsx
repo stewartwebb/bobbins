@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import type { MessageAttachment } from '../../../../types';
 import type { ChatController } from '../../hooks/useChatController';
-import { IconArrowDown, IconMic, IconMicOff, IconPhone, IconScreenShare, IconVideo, IconVideoOff } from './Icons';
+import { IconArrowDown, IconMenu, IconMic, IconMicOff, IconPhone, IconScreenShare, IconVideo, IconVideoOff } from './Icons';
 import MarkdownMessage from './MarkdownMessage';
 import VideoAttachmentPlayer from './VideoAttachmentPlayer';
 
@@ -20,7 +20,12 @@ const EMPTY_STATES = {
   },
 } as const;
 
-const ChatMainArea: React.FC<{ controller: ChatController }> = ({ controller }) => {
+type ChatMainAreaProps = {
+  controller: ChatController;
+  onOpenNavigation?: () => void;
+};
+
+const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigation }) => {
   const {
     state: {
       selectedServer,
@@ -99,11 +104,9 @@ const ChatMainArea: React.FC<{ controller: ChatController }> = ({ controller }) 
 
       if (isVideo) {
         return (
-          <VideoAttachmentPlayer
-            key={attachment.id}
-            attachment={attachment}
-            formatFileSize={formatFileSize}
-          />
+          <div key={attachment.id} className="w-full max-w-full sm:mx-auto sm:max-w-3xl">
+            <VideoAttachmentPlayer attachment={attachment} formatFileSize={formatFileSize} />
+          </div>
         );
       }
 
@@ -113,15 +116,17 @@ const ChatMainArea: React.FC<{ controller: ChatController }> = ({ controller }) 
             key={attachment.id}
             type="button"
             onClick={() => handlePreviewAttachment(attachment)}
-            className="group block max-w-3xl overflow-hidden rounded-lg border border-slate-800/70 bg-slate-950/60 text-left shadow-sm shadow-slate-900/30 transition hover:border-primary-400/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+            className="group block w-full max-w-full overflow-hidden rounded-xl border border-slate-800/70 bg-slate-950/60 text-left shadow-sm shadow-slate-900/30 transition hover:border-primary-400/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 sm:mx-auto sm:max-w-3xl"
           >
-            <img
-              src={previewSource}
-              alt={attachment.file_name}
-              loading="lazy"
-              className="max-h-72 w-full object-cover"
-            />
-            <div className="flex items-center justify-between gap-3 border-t border-slate-800/70 bg-slate-950/80 px-3 py-2 text-xs text-slate-300">
+            <div className="flex max-h-[70vh] w-full items-center justify-center bg-slate-900/80">
+              <img
+                src={previewSource}
+                alt={attachment.file_name}
+                loading="lazy"
+                className="h-auto max-h-[70vh] w-auto max-w-full object-contain"
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/70 bg-slate-950/80 px-3 py-2 text-xs text-slate-300">
               <span className="truncate">{attachment.file_name}</span>
               <span className="font-mono text-[10px] text-slate-500">{sizeLabel}</span>
             </div>
@@ -135,7 +140,7 @@ const ChatMainArea: React.FC<{ controller: ChatController }> = ({ controller }) 
           href={attachment.url}
           target="_blank"
           rel="noreferrer"
-          className="flex max-w-3xl items-center justify-between gap-4 rounded-lg border border-slate-800/70 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 transition hover:border-primary-400/60 hover:text-primary-100"
+          className="flex w-full max-w-full items-center justify-between gap-4 rounded-lg border border-slate-800/70 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 transition hover:border-primary-400/60 hover:text-primary-100 sm:mx-auto sm:max-w-3xl"
         >
           <div className="flex items-center gap-3">
             <span className="text-xl">📎</span>
@@ -154,17 +159,31 @@ const ChatMainArea: React.FC<{ controller: ChatController }> = ({ controller }) 
   );
 
   return (
-    <main className="flex flex-1 flex-col h-screen">
-      <header className="flex items-center justify-between border-b border-slate-800/70 bg-slate-950/70 px-5 py-3">
-        <div>
-          <p className="font-mono text-[11px] text-slate-500">
-            bafa@chat:~/servers/{selectedServer?.id ?? 'workspace'}/{selectedChannel?.id ?? 'channel'}
-          </p>
-          <h1 className="mt-1 text-lg font-semibold text-white">
-            {selectedChannel ? `#${selectedChannel.name}` : 'Select a channel'}
-          </h1>
+    <main className="flex min-h-dvh flex-1 flex-col md:h-screen">
+      <header className="flex items-center justify-between border-b border-slate-800/70 bg-slate-950/70 px-4 py-3 sm:px-5">
+        <div className="flex flex-1 items-start gap-3">
+          <button
+            type="button"
+            onClick={onOpenNavigation}
+            disabled={!onOpenNavigation}
+            className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-lg border border-slate-800/70 text-slate-300 transition hover:border-primary-400 hover:text-primary-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-default disabled:opacity-60 md:hidden"
+            aria-label="Open navigation menu"
+          >
+            <IconMenu className="h-5 w-5" />
+          </button>
+          <div className="flex flex-1 flex-col">
+            <p className="font-mono text-[11px] text-slate-500">
+              bafa@chat:~/servers/{selectedServer?.id ?? 'workspace'}/{selectedChannel?.id ?? 'channel'}
+            </p>
+            <h1 className="mt-1 text-lg font-semibold text-white md:text-left">
+              {selectedChannel ? `#${selectedChannel.name}` : 'Select a channel'}
+            </h1>
+            {selectedChannel?.description && (
+              <p className="mt-1 text-xs text-slate-400 md:hidden">{selectedChannel.description}</p>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-400">
+        <div className="hidden items-center gap-2 text-xs text-slate-400 md:flex">
           <span className="hidden rounded-lg border border-slate-800/60 px-3 py-1 font-mono sm:inline-flex">
             {filteredMessages.length} entries
           </span>

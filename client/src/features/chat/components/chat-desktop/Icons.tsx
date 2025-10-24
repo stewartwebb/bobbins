@@ -86,3 +86,9 @@ export const IconArrowDown: React.FC<IconProps> = ({ className = 'h-4 w-4' }) =>
     <path d="M12 16.5 5 9.5l1.4-1.4 5.6 5.59 5.6-5.6L19 9.5z" />
   </svg>
 );
+
+export const IconMenu: React.FC<IconProps> = ({ className = 'h-5 w-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z" />
+  </svg>
+);

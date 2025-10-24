@@ -190,12 +190,12 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
   }, [attachment.id]);
 
   return (
-    <div className="max-w-3xl overflow-hidden rounded-lg border border-slate-800/70 bg-slate-950/80 shadow-sm shadow-slate-900/40">
+    <div className="w-full overflow-hidden rounded-lg border border-slate-800/70 bg-slate-950/80 shadow-sm shadow-slate-900/40">
       <div className="relative bg-black">
         <video
           ref={videoRef}
           src={attachment.url}
-          className="h-full w-full bg-black"
+          className="block h-auto max-h-[70vh] w-full bg-black object-contain"
           preload="metadata"
           poster={attachment.preview_url}
           onLoadedMetadata={handleLoadedMetadata}
