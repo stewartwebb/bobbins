@@ -1,6 +1,6 @@
 import React, { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { serversAPI, invitesAPI } from '../services/api';
+import { serversAPI } from '../services/api';
 
 const CreateServerPage: React.FC = () => {
   const navigate = useNavigate();

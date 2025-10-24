@@ -5,7 +5,6 @@ import {
   User,
   Server,
   Channel,
-  Message,
   AuthResponse,
   RegisterResponse,
   VerifyEmailResponse,
