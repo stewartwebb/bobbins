@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -40,33 +42,42 @@ type EmailTaskPayload struct {
 
 // ConfigFromEnv builds an Asynq configuration using environment variables.
 func ConfigFromEnv() Config {
-	addr := strings.TrimSpace(os.Getenv("REDIS_ADDR"))
-	if addr == "" {
-		addr = "127.0.0.1:6379"
+	cfg := Config{
+		Addr:        "127.0.0.1:6379",
+		Password:    "",
+		DB:          0,
+		Concurrency: 5,
 	}
 
-	password := os.Getenv("REDIS_PASSWORD")
+	if addr, password, db, ok := parseRedisURL(strings.TrimSpace(os.Getenv("REDIS_URL"))); ok {
+		if addr != "" {
+			cfg.Addr = addr
+		}
+		cfg.Password = password
+		cfg.DB = db
+	}
 
-	db := 0
+	if raw := strings.TrimSpace(os.Getenv("REDIS_ADDR")); raw != "" {
+		cfg.Addr = raw
+	}
+
+	if raw := os.Getenv("REDIS_PASSWORD"); raw != "" {
+		cfg.Password = raw
+	}
+
 	if raw := strings.TrimSpace(os.Getenv("REDIS_DB")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil {
-			db = parsed
+			cfg.DB = parsed
 		}
 	}
 
-	concurrency := 5
 	if raw := strings.TrimSpace(os.Getenv("ASYNQ_CONCURRENCY")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			concurrency = parsed
+			cfg.Concurrency = parsed
 		}
 	}
 
-	return Config{
-		Addr:        addr,
-		Password:    password,
-		DB:          db,
-		Concurrency: concurrency,
-	}
+	return cfg
 }
 
 // NewClient returns a new Asynq client for enqueuing tasks.
@@ -162,4 +173,44 @@ func handleEmailDelivery(ctx context.Context, task *asynq.Task, emailService *em
 	}
 
 	return nil
+}
+
+func parseRedisURL(raw string) (addr, password string, db int, ok bool) {
+	if raw == "" {
+		return "", "", 0, false
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", 0, false
+	}
+
+	if host := u.Hostname(); host != "" {
+		port := u.Port()
+		if port == "" {
+			port = "6379"
+		}
+		addr = net.JoinHostPort(host, port)
+	} else if u.Host != "" {
+		addr = u.Host
+	}
+
+	if u.User != nil {
+		password, _ = u.User.Password()
+	}
+
+	path := strings.TrimPrefix(u.Path, "/")
+	if path != "" {
+		if parsed, err := strconv.Atoi(path); err == nil {
+			db = parsed
+		}
+	}
+
+	if rawDB := u.Query().Get("db"); rawDB != "" {
+		if parsed, err := strconv.Atoi(rawDB); err == nil {
+			db = parsed
+		}
+	}
+
+	return addr, password, db, true
 }
