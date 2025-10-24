@@ -8,6 +8,8 @@ yarn-error.log*
 /build
 /dist
 *.exe
+client/build
+client/dist
 
 # Environment variables
 .env
