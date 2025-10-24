@@ -206,7 +206,7 @@ func buildVideoPreview(ctx context.Context, storageService *storage.Service, att
         "ffmpeg",
         "-y",
         "-i", videoPath,
-        "-vf", fmt.Sprintf("thumbnail,scale='min(%d,iw)':-1", previewMaxWidth),
+    "-vf", fmt.Sprintf("thumbnail,scale=min(%d\\,iw):-1", previewMaxWidth),
         "-frames:v", "1",
         thumbPath,
     )
@@ -276,4 +276,3 @@ func resizeToFit(img image.Image, maxWidth, maxHeight int) image.Image {
 
     return imaging.Resize(img, targetWidth, targetHeight, imaging.Lanczos)
 }
-*** End of File

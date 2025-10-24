@@ -7,6 +7,7 @@ import (
 	"bafachat/internal/email"
 	"bafachat/internal/models"
 	"bafachat/internal/storage"
+	"bafachat/internal/webrtc"
 	"bafachat/internal/websocket"
 
 	"github.com/gin-gonic/gin"
@@ -88,6 +89,36 @@ func getStorageService(c *gin.Context) (*storage.Service, bool) {
 	}
 
 	return service, true
+}
+
+func getWebRTCManager(c *gin.Context) (*webrtc.Manager, bool) {
+	value, exists := c.Get("webrtcManager")
+	if !exists {
+		return nil, false
+	}
+
+	manager, ok := value.(*webrtc.Manager)
+	if !ok {
+		log.Println("invalid webrtc manager type")
+		return nil, false
+	}
+
+	return manager, true
+}
+
+func getWebRTCConfig(c *gin.Context) (webrtc.Config, bool) {
+	value, exists := c.Get("webrtcConfig")
+	if !exists {
+		return webrtc.Config{}, false
+	}
+
+	config, ok := value.(webrtc.Config)
+	if !ok {
+		log.Println("invalid webrtc config type")
+		return webrtc.Config{}, false
+	}
+
+	return config, true
 }
 
 func getUserClaims(c *gin.Context) (*auth.Claims, bool) {

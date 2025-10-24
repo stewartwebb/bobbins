@@ -16,6 +16,7 @@ export interface Server {
   icon?: string | null;
   owner_id: number;
   owner?: Partial<User> | null;
+  current_member_role?: 'owner' | 'member';
   channels?: Channel[];
   members?: User[];
   created_at: string;
@@ -26,7 +27,7 @@ export interface Channel {
   id: number;
   name: string;
   description?: string;
-  type: 'text' | 'audio' | 'voice' | 'category';
+  type: 'text' | 'audio';
   server_id: number;
   server?: Server;
   messages?: Message[];
@@ -151,7 +152,7 @@ export interface AcceptInviteResponse {
 export interface CreateChannelRequest {
   name: string;
   description?: string;
-  type: 'text' | 'audio' | 'voice' | 'category';
+  type: 'text' | 'audio';
   server_id: number;
   position?: number;
 }
@@ -216,4 +217,34 @@ export interface WebSocketMessage {
   user_id?: string;
   channel_id?: string;
   timestamp: string;
+}
+
+export interface WebRTCMediaState {
+  mic: string;
+  camera: string;
+  screen: string;
+}
+
+export interface WebRTCParticipant {
+  user_id: number;
+  display_name: string;
+  role?: string;
+  session_id?: string;
+  channel_id?: number;
+  media_state?: WebRTCMediaState;
+  last_seen?: string;
+}
+
+export interface JoinWebRTCResponse {
+  session_token: string;
+  expires_at: string;
+  channel: {
+    id: number;
+    name: string;
+    type: string;
+  };
+  participant: WebRTCParticipant;
+  participants: WebRTCParticipant[];
+  iceservers: unknown;
+  sfu: unknown;
 }

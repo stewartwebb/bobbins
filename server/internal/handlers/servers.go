@@ -48,6 +48,7 @@ func GetServers(c *gin.Context) {
 
 	var servers []models.Server
 	err := db.WithContext(c).
+		Select("servers.*, server_members.role AS current_member_role").
 		Joins("JOIN server_members ON server_members.server_id = servers.id AND server_members.user_id = ?", claims.UserID).
 		Preload("Owner").
 		Find(&servers).Error
@@ -150,6 +151,8 @@ func CreateServer(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load server"})
 		return
 	}
+
+	server.CurrentMemberRole = models.ServerRoleOwner
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Server created",
@@ -273,11 +276,10 @@ func GetServer(c *gin.Context) {
 	}
 
 	var server models.Server
-	err = db.WithContext(c).
+	if err := db.WithContext(c).
 		Preload("Owner").
 		Where("id = ?", uint(serverIDValue)).
-		First(&server).Error
-	if err != nil {
+		First(&server).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 			return
@@ -286,16 +288,19 @@ func GetServer(c *gin.Context) {
 		return
 	}
 
-	if err := ensureServerMembership(db.WithContext(c), server.ID, claims.UserID); err != nil {
-		switch err {
-		case errServerMembershipRequired:
+	var membership models.ServerMember
+	if err := db.WithContext(c).
+		Where("server_id = ? AND user_id = ?", server.ID, claims.UserID).
+		First(&membership).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "membership required"})
 			return
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify membership"})
-			return
 		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify membership"})
+		return
 	}
+
+	server.CurrentMemberRole = membership.Role
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"server": serializeServer(server)}})
 }
@@ -521,6 +526,7 @@ func serializeServer(server models.Server) gin.H {
 		"icon":        server.Icon,
 		"owner_id":    server.OwnerID,
 		"owner":       owner,
+		"current_member_role": server.CurrentMemberRole,
 		"created_at":  server.CreatedAt.Format(time.RFC3339),
 		"updated_at":  server.UpdatedAt.Format(time.RFC3339),
 	}

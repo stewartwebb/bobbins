@@ -22,6 +22,7 @@ import {
   CreateAttachmentUploadResponse,
   GetMessagesParams,
   GetMessagesResponse,
+  JoinWebRTCResponse,
 } from '../types/index';
 
 export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080/api/v1';
@@ -64,8 +65,8 @@ export const authAPI = {
   },
 
   getCurrentUser: async (): Promise<User> => {
-    const response = await api.get('/users/me');
-    return response.data;
+    const response = await api.get<{ data: { user: User } }>('/users/me');
+    return response.data.data.user;
   },
 };
 
@@ -131,6 +132,15 @@ export const channelsAPI = {
 
   sendTypingIndicator: async (channelId: number, active = true): Promise<void> => {
     await api.post(`/channels/${channelId}/typing`, { active });
+  },
+
+  joinWebRTC: async (channelId: number): Promise<JoinWebRTCResponse> => {
+    const response = await api.post<{ data: JoinWebRTCResponse }>(`/channels/${channelId}/webrtc/join`);
+    return response.data.data;
+  },
+
+  leaveWebRTC: async (channelId: number, sessionToken: string): Promise<void> => {
+    await api.post(`/channels/${channelId}/webrtc/leave`, { session_token: sessionToken });
   },
 };
 

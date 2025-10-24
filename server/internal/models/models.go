@@ -49,6 +49,7 @@ type Server struct {
 	Members         []User         `json:"members" gorm:"many2many:server_members;"`
 	MemberRelations []ServerMember `json:"-" gorm:"foreignKey:ServerID"`
 	Invites         []ServerInvite `json:"-" gorm:"foreignKey:ServerID"`
+	CurrentMemberRole string       `json:"current_member_role,omitempty" gorm:"-"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 }

@@ -28,8 +28,6 @@ func GetChannels(c *gin.Context) {
 		return
 	}
 
-	storageService, hasStorage := getStorageService(c)
-
 	claims, ok := getUserClaims(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
@@ -355,6 +353,8 @@ func CreateMessage(c *gin.Context) {
 		return
 	}
 
+	storageService, hasStorage := getStorageService(c)
+
 	content := strings.TrimSpace(req.Content)
 	hasAttachments := len(req.Attachments) > 0
 
@@ -639,18 +639,18 @@ func SendTypingIndicator(c *gin.Context) {
 
 func serializeAttachment(attachment models.MessageAttachment) gin.H {
 	return gin.H{
-		"id":           attachment.ID,
-		"object_key":   attachment.ObjectKey,
-		"url":          attachment.URL,
-		"file_name":    attachment.FileName,
-		"content_type": attachment.ContentType,
-		"file_size":    attachment.FileSize,
-		"width":        attachment.Width,
-		"height":       attachment.Height,
-		"preview_url":  attachment.PreviewURL,
+		"id":                 attachment.ID,
+		"object_key":         attachment.ObjectKey,
+		"url":                attachment.URL,
+		"file_name":          attachment.FileName,
+		"content_type":       attachment.ContentType,
+		"file_size":          attachment.FileSize,
+		"width":              attachment.Width,
+		"height":             attachment.Height,
+		"preview_url":        attachment.PreviewURL,
 		"preview_object_key": attachment.PreviewObjectKey,
-		"preview_width": attachment.PreviewWidth,
-		"preview_height": attachment.PreviewHeight,
-		"created_at":   attachment.CreatedAt.Format(time.RFC3339),
+		"preview_width":      attachment.PreviewWidth,
+		"preview_height":     attachment.PreviewHeight,
+		"created_at":         attachment.CreatedAt.Format(time.RFC3339),
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"bafachat/internal/database"
 	"bafachat/internal/email"
@@ -13,6 +14,7 @@ import (
 	"bafachat/internal/middleware"
 	"bafachat/internal/queue"
 	"bafachat/internal/storage"
+	"bafachat/internal/webrtc"
 	"bafachat/internal/websocket"
 
 	"github.com/gin-gonic/gin"
@@ -70,6 +72,17 @@ func main() {
 	hub := websocket.NewHub()
 	go hub.Run()
 
+	// Initialize WebRTC signaling manager and config
+	rtcManager := webrtc.NewManager(2 * time.Minute)
+	rtcConfig := webrtc.ConfigFromEnv()
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			rtcManager.Cleanup()
+		}
+	}()
+
 	// Initialize storage service
 	storageService, storageErr := storage.NewServiceFromEnv(context.Background())
 	if storageErr != nil {
@@ -101,6 +114,8 @@ func main() {
 			c.Set("storage", storageService)
 		}
 		c.Set("wsHub", hub)
+		c.Set("webrtcManager", rtcManager)
+		c.Set("webrtcConfig", rtcConfig)
 		c.Next()
 	})
 
@@ -148,6 +163,8 @@ func main() {
 			protected.POST("/channels/:id/messages/attachments", handlers.UploadAttachmentMessage)
 			protected.POST("/channels/:id/attachments/presign", handlers.CreateAttachmentUpload)
 			protected.POST("/channels/:id/typing", handlers.SendTypingIndicator)
+			protected.POST("/channels/:id/webrtc/join", handlers.JoinWebRTCChannel)
+			protected.POST("/channels/:id/webrtc/leave", handlers.LeaveWebRTCChannel)
 
 			protected.POST("/invites/:code/accept", handlers.AcceptInvite)
 		}
@@ -155,7 +172,7 @@ func main() {
 
 	// WebSocket endpoint
 	r.GET("/ws", func(c *gin.Context) {
-		websocket.HandleWebSocket(hub, c)
+		websocket.HandleWebSocket(hub, rtcManager, c)
 	})
 
 	// Start server

@@ -11,7 +11,15 @@ import { useNavigate } from 'react-router-dom';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { authAPI, buildWebSocketURL, channelsAPI, serversAPI, uploadsAPI } from '../services/api';
-import type { Channel, Message, MessageAttachment, Server, User } from '../types';
+import type {
+  Channel,
+  Message,
+  MessageAttachment,
+  Server,
+  User,
+  WebRTCParticipant,
+  WebRTCMediaState,
+} from '../types';
 
 type WebSocketEnvelope = {
   type: string;
@@ -23,6 +31,12 @@ type WebSocketEnvelope = {
     user?: Partial<User> | null;
     expires_at?: string;
     active?: boolean;
+    code?: string;
+    reason?: string;
+    participant?: WebRTCParticipant;
+    participants?: WebRTCParticipant[];
+    media_state?: WebRTCMediaState;
+    [key: string]: unknown;
   };
 };
 
@@ -35,31 +49,51 @@ type UploadTracker = {
   error?: string;
 };
 
-const EMPTY_STATES = {
-  noChannel: {
-    title: 'Choose a channel',
-    body: 'Pick a channel from the sidebar to start collaborating.'
-  },
-  audioChannel: {
-    title: 'Audio channels coming soon',
-    body: 'Voice rooms are on the roadmap. For now, hop into a text channel to chat.'
-  },
-  emptyMessages: {
-    title: 'This channel is quiet',
-    body: 'Be the first to say hello and set the tone for the conversation.'
-  }
-} as const;
-
-const MESSAGE_PAGE_SIZE = 50;
-const TYPING_EVENT_FALLBACK_MS = 6000;
-const TYPING_THROTTLE_MS = 2000;
-const TYPING_PRUNE_INTERVAL_MS = 1000;
-
 type TypingEntry = {
   id: number;
   name: string;
   expiresAt: number;
 };
+
+type WebRTCSessionStatus = 'authenticating' | 'connected' | 'error';
+
+type WebRTCSessionState = {
+  channelId: number;
+  sessionToken: string;
+  expiresAt: string;
+  participant: WebRTCParticipant;
+  participants: WebRTCParticipant[];
+  iceservers: unknown;
+  sfu: unknown;
+  status: WebRTCSessionStatus;
+  error?: string;
+};
+
+const DEFAULT_MEDIA_STATE: WebRTCMediaState = {
+  mic: 'off',
+  camera: 'off',
+  screen: 'off',
+};
+
+const EMPTY_STATES = {
+  noChannel: {
+    title: 'Choose a channel',
+    body: 'Pick a channel from the sidebar to start collaborating.',
+  },
+  audioChannel: {
+    title: 'Hop into voice',
+    body: 'Join the audio channel to start a live conversation with your team.',
+  },
+  emptyMessages: {
+    title: 'This channel is quiet',
+    body: 'Be the first to say hello and set the tone for the conversation.',
+  },
+} as const;
+
+const MESSAGE_PAGE_SIZE = 50;
+const TYPING_THROTTLE_MS = 2500;
+const TYPING_PRUNE_INTERVAL_MS = 4000;
+const TYPING_EVENT_FALLBACK_MS = 7500;
 
 type IconProps = {
   className?: string;
@@ -145,10 +179,7 @@ const markdownComponents: Components = {
     );
   },
   blockquote: ({ children, ...props }) => (
-    <blockquote
-      {...props}
-      className="border-l-2 border-primary-400/60 pl-3 text-sm italic text-primary-100/80"
-    >
+    <blockquote {...props} className="border-l-2 border-primary-400/60 pl-3 text-sm italic text-primary-100/80">
       {children}
     </blockquote>
   ),
@@ -186,7 +217,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const formatTimestamp = useCallback((value: number) => {
-    if (!Number.isFinite(value) || value < 0) {
+    if (!Number.isFinite(value) || value <= 0) {
       return '0:00';
     }
 
@@ -203,6 +234,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     if (!video) {
       return;
     }
+
     setDuration(video.duration || 0);
     setProgress(video.currentTime || 0);
     setIsMuted(video.muted || video.volume === 0);
@@ -213,6 +245,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     if (!video) {
       return;
     }
+
     setProgress(video.currentTime);
   }, []);
 
@@ -251,6 +284,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     if (!video) {
       return;
     }
+
     const next = !video.muted;
     video.muted = next;
     setIsMuted(next || video.volume === 0);
@@ -261,6 +295,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     if (!video) {
       return;
     }
+
     setIsMuted(video.muted || video.volume === 0);
   }, []);
 
@@ -292,9 +327,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
       video.requestFullscreen?.bind(video) ||
       (video as HTMLVideoElement & { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen?.bind(video);
 
-    const exitFullscreen =
-      doc.exitFullscreen?.bind(doc) ||
-      doc.webkitExitFullscreen?.bind(doc);
+    const exitFullscreen = doc.exitFullscreen?.bind(doc) || doc.webkitExitFullscreen?.bind(doc);
 
     const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement;
 
@@ -335,6 +368,20 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange as EventListener);
     };
   }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    video.pause();
+    video.currentTime = 0;
+    setIsPlaying(false);
+    setProgress(0);
+    setDuration(0);
+    setIsMuted(video.muted || video.volume === 0);
+  }, [attachment.id]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-800/70 bg-slate-950/80 shadow-sm shadow-slate-900/40">
@@ -424,13 +471,65 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
             onClick={handleViewOriginal}
             className="rounded-md border border-primary-400/60 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.3em] text-primary-200 transition hover:bg-primary-400/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
           >
-            View Original
+            View original
           </button>
         </div>
       </div>
     </div>
   );
 };
+
+const mergeMediaState = (
+  base?: WebRTCMediaState | null,
+  incoming?: WebRTCMediaState | null
+): WebRTCMediaState => ({
+  mic: incoming?.mic ?? base?.mic ?? DEFAULT_MEDIA_STATE.mic,
+  camera: incoming?.camera ?? base?.camera ?? DEFAULT_MEDIA_STATE.camera,
+  screen: incoming?.screen ?? base?.screen ?? DEFAULT_MEDIA_STATE.screen,
+});
+
+const normalizeParticipantRoster = (roster: WebRTCParticipant[]): WebRTCParticipant[] => {
+  const byId = new Map<number, WebRTCParticipant>();
+
+  roster.forEach((participant) => {
+    if (typeof participant.user_id !== 'number') {
+      return;
+    }
+
+    const existing = byId.get(participant.user_id);
+    const displayName =
+      typeof participant.display_name === 'string' && participant.display_name.trim().length > 0
+        ? participant.display_name
+        : existing?.display_name ?? `Member #${participant.user_id}`;
+
+    const merged: WebRTCParticipant = {
+      ...existing,
+      ...participant,
+      display_name: displayName,
+      media_state: mergeMediaState(existing?.media_state, participant.media_state),
+    };
+
+    byId.set(participant.user_id, merged);
+  });
+
+  return Array.from(byId.values()).sort((a, b) => {
+    const nameA = (a.display_name || '').toLowerCase();
+    const nameB = (b.display_name || '').toLowerCase();
+    const comparison = nameA.localeCompare(nameB);
+    if (comparison !== 0) {
+      return comparison;
+    }
+    return a.user_id - b.user_id;
+  });
+};
+
+const upsertParticipant = (participants: WebRTCParticipant[], next: WebRTCParticipant): WebRTCParticipant[] => {
+  const filtered = participants.filter((entry) => entry.user_id !== next.user_id);
+  return normalizeParticipantRoster([...filtered, next]);
+};
+
+const removeParticipantById = (participants: WebRTCParticipant[], userId: number): WebRTCParticipant[] =>
+  participants.filter((entry) => entry.user_id !== userId);
 
 const ChatPage: React.FC = () => {
   const navigate = useNavigate();
@@ -459,6 +558,19 @@ const ChatPage: React.FC = () => {
   const [composerMaxHeight, setComposerMaxHeight] = useState(240);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [typingByChannel, setTypingByChannel] = useState<Record<number, TypingEntry[]>>({});
+  const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
+  const [isCreatingChannel, setIsCreatingChannel] = useState(false);
+  const [createChannelError, setCreateChannelError] = useState('');
+  const [createChannelForm, setCreateChannelForm] = useState<{ name: string; description: string; type: 'text' | 'audio' }>(
+    {
+      name: '',
+      description: '',
+      type: 'text',
+    }
+  );
+  const [webrtcState, setWebrtcState] = useState<WebRTCSessionState | null>(null);
+  const [isJoiningWebRTC, setIsJoiningWebRTC] = useState(false);
+  const [webrtcError, setWebrtcError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const selectedServerIdRef = useRef<number | null>(null);
@@ -480,6 +592,8 @@ const ChatPage: React.FC = () => {
   const isTypingRef = useRef(false);
   const lastTypingChannelRef = useRef<number | null>(null);
   const previousChannelIdRef = useRef<number | null>(null);
+  const webrtcSessionRef = useRef<WebRTCSessionState | null>(null);
+  const pendingWebRTCAuthRef = useRef<{ sessionToken: string; channelId: number } | null>(null);
 
   const normalizeChannelList = useCallback(
     (list: Channel[]) =>
@@ -492,6 +606,16 @@ const ChatPage: React.FC = () => {
     []
   );
 
+  const canManageChannels = useMemo(() => {
+    if (!selectedServer || !currentUser) {
+      return false;
+    }
+    if (selectedServer.current_member_role) {
+      return selectedServer.current_member_role === 'owner';
+    }
+    return selectedServer.owner_id === currentUser.id;
+  }, [selectedServer, currentUser]);
+
   useEffect(() => {
     selectedServerIdRef.current = selectedServer?.id ?? null;
   }, [selectedServer?.id]);
@@ -503,6 +627,12 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     currentUserIdRef.current = currentUser?.id ?? null;
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!canManageChannels && isCreateChannelOpen) {
+      setIsCreateChannelOpen(false);
+    }
+  }, [canManageChannels, isCreateChannelOpen]);
 
   useEffect(() => {
     const previousId = previousChannelIdRef.current;
@@ -639,6 +769,147 @@ const ChatPage: React.FC = () => {
       return next;
     });
   }, []);
+
+  const sendWebSocketMessage = useCallback(
+    (payload: unknown): boolean => {
+      const socket = wsRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+
+      try {
+        socket.send(JSON.stringify(payload));
+        return true;
+      } catch (error) {
+        console.debug('Failed to send websocket payload', error);
+        return false;
+      }
+    },
+    []
+  );
+
+  const authenticateWebRTCSession = useCallback(
+    (session: WebRTCSessionState) => {
+      pendingWebRTCAuthRef.current = {
+        sessionToken: session.sessionToken,
+        channelId: session.channelId,
+      };
+
+      const sent = sendWebSocketMessage({
+        type: 'session.authenticate',
+        data: {
+          session_token: session.sessionToken,
+          channel_id: session.channelId,
+        },
+      });
+
+      if (sent) {
+        pendingWebRTCAuthRef.current = null;
+      }
+    },
+    [sendWebSocketMessage]
+  );
+
+  const updateWebRTCState = useCallback(
+    (updater: (previous: WebRTCSessionState | null) => WebRTCSessionState | null) => {
+      setWebrtcState((previous) => {
+        const next = updater(previous);
+        webrtcSessionRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleJoinAudioChannel = useCallback(async () => {
+    if (!selectedChannel || selectedChannel.type !== 'audio' || isJoiningWebRTC) {
+      return;
+    }
+
+    setIsJoiningWebRTC(true);
+    setWebrtcError(null);
+
+    try {
+      const response = await channelsAPI.joinWebRTC(selectedChannel.id);
+      const roster = normalizeParticipantRoster([
+        response.participant,
+        ...(response.participants ?? []),
+      ]);
+
+      const others = roster.filter((entry) => entry.user_id !== response.participant.user_id);
+
+      const session: WebRTCSessionState = {
+        channelId: selectedChannel.id,
+        sessionToken: response.session_token,
+        expiresAt: response.expires_at,
+        participant: response.participant,
+        participants: others,
+        iceservers: response.iceservers,
+        sfu: response.sfu,
+        status: 'authenticating',
+      };
+
+      updateWebRTCState(() => session);
+
+      authenticateWebRTCSession(session);
+    } catch (joinError) {
+      const apiMessage =
+        typeof joinError === 'object' &&
+        joinError !== null &&
+        'response' in joinError &&
+        (joinError as { response?: { data?: { error?: string } } }).response?.data?.error;
+
+      const fallback = 'We couldn’t connect you to this audio channel. Please try again.';
+      setWebrtcError(typeof apiMessage === 'string' && apiMessage.trim().length > 0 ? apiMessage : fallback);
+      updateWebRTCState(() => null);
+    } finally {
+      setIsJoiningWebRTC(false);
+    }
+  }, [authenticateWebRTCSession, isJoiningWebRTC, selectedChannel, updateWebRTCState]);
+
+  const handleLeaveAudioChannel = useCallback(async () => {
+    const session = webrtcSessionRef.current;
+    if (!session) {
+      updateWebRTCState(() => null);
+      setWebrtcError(null);
+      setIsJoiningWebRTC(false);
+      return;
+    }
+
+    pendingWebRTCAuthRef.current = null;
+    updateWebRTCState(() => null);
+    setWebrtcError(null);
+    setIsJoiningWebRTC(false);
+
+    sendWebSocketMessage({
+      type: 'session.leave',
+      data: {
+        channel_id: session.channelId,
+      },
+    });
+
+    try {
+      await channelsAPI.leaveWebRTC(session.channelId, session.sessionToken);
+    } catch (leaveError) {
+      console.debug('Failed to terminate WebRTC session cleanly', leaveError);
+    }
+  }, [sendWebSocketMessage, updateWebRTCState]);
+
+  useEffect(() => () => {
+    void handleLeaveAudioChannel();
+  }, [handleLeaveAudioChannel]);
+
+  useEffect(() => {
+    const session = webrtcSessionRef.current;
+    if (!session) {
+      setWebrtcError(null);
+      return;
+    }
+
+    if (!selectedChannel || selectedChannel.id !== session.channelId || selectedChannel.type !== 'audio') {
+      void handleLeaveAudioChannel();
+    }
+  }, [handleLeaveAudioChannel, selectedChannel]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -859,7 +1130,7 @@ const ChatPage: React.FC = () => {
     const fetchMessages = async () => {
       try {
         setIsLoadingMessages(true);
-  const result = await channelsAPI.getMessages(selectedChannel.id, {
+        const result = await channelsAPI.getMessages(selectedChannel.id, {
           limit: MESSAGE_PAGE_SIZE,
         });
         if (!isMounted) {
@@ -896,7 +1167,7 @@ const ChatPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedChannel]);
+  }, [selectedChannel, setAutoScrollOnNextRender]);
 
   useEffect(() => {
     const token = localStorage.getItem('authToken');
@@ -916,6 +1187,172 @@ const ChatPage: React.FC = () => {
         try {
           const payload: WebSocketEnvelope = JSON.parse(event.data);
           if (!payload || !payload.type) {
+            return;
+          }
+
+          if (payload.type === 'session.ready') {
+            const rawChannelId = payload.data?.channel_id;
+            const channelId =
+              typeof rawChannelId === 'number'
+                ? rawChannelId
+                : typeof rawChannelId === 'string'
+                  ? Number(rawChannelId)
+                  : Number.NaN;
+
+            if (!Number.isFinite(channelId)) {
+              return;
+            }
+
+            pendingWebRTCAuthRef.current = null;
+
+            setWebrtcState((previous) => {
+              if (!previous || previous.channelId !== channelId) {
+                return previous;
+              }
+
+              const next: WebRTCSessionState = {
+                ...previous,
+                status: 'connected',
+                error: undefined,
+              };
+              webrtcSessionRef.current = next;
+              return next;
+            });
+            return;
+          }
+
+          if (payload.type === 'session.error') {
+            const messageField = payload.data?.message as unknown;
+            const codeField = payload.data?.code as unknown;
+            const description =
+              typeof messageField === 'string' && messageField.trim().length > 0
+                ? messageField
+                : typeof codeField === 'string' && codeField.trim().length > 0
+                  ? `Session error: ${codeField}`
+                  : 'Your audio session encountered an issue.';
+
+            pendingWebRTCAuthRef.current = null;
+            webrtcSessionRef.current = null;
+            setWebrtcState(null);
+            setWebrtcError(description);
+            return;
+          }
+
+          if (payload.type === 'participant.joined' || payload.type === 'participant.updated') {
+            const data = (payload.data ?? {}) as Record<string, unknown>;
+            const rawChannelId = data.channel_id;
+            const rawUserId = data.user_id;
+
+            const channelId =
+              typeof rawChannelId === 'number'
+                ? rawChannelId
+                : typeof rawChannelId === 'string'
+                  ? Number(rawChannelId)
+                  : Number.NaN;
+            const userId =
+              typeof rawUserId === 'number'
+                ? rawUserId
+                : typeof rawUserId === 'string'
+                  ? Number(rawUserId)
+                  : Number.NaN;
+
+            if (!Number.isFinite(channelId) || !Number.isFinite(userId)) {
+              return;
+            }
+
+            setWebrtcState((previous) => {
+              if (!previous || previous.channelId !== channelId) {
+                return previous;
+              }
+
+              const baseParticipant =
+                previous.participant.user_id === userId
+                  ? previous.participant
+                  : previous.participants.find((participant) => participant.user_id === userId);
+
+              const incomingMedia =
+                typeof data.media_state === 'object' && data.media_state !== null
+                  ? (data.media_state as WebRTCMediaState)
+                  : undefined;
+
+              const participant: WebRTCParticipant = {
+                ...baseParticipant,
+                user_id: userId,
+                channel_id: channelId,
+                display_name:
+                  typeof data.display_name === 'string' && data.display_name.trim().length > 0
+                    ? (data.display_name as string)
+                    : baseParticipant?.display_name ?? `Member #${userId}`,
+                role: typeof data.role === 'string' ? (data.role as string) : baseParticipant?.role,
+                session_id: typeof data.session_id === 'string' ? (data.session_id as string) : baseParticipant?.session_id,
+                media_state: mergeMediaState(baseParticipant?.media_state, incomingMedia),
+                last_seen: typeof data.last_seen === 'string' ? (data.last_seen as string) : baseParticipant?.last_seen,
+              };
+
+              const nextParticipants = upsertParticipant(previous.participants, participant);
+              const isSelf = previous.participant.user_id === userId;
+              const nextSelf = isSelf ? { ...previous.participant, ...participant } : previous.participant;
+
+              const next: WebRTCSessionState = {
+                ...previous,
+                participant: nextSelf,
+                participants: nextParticipants,
+              };
+
+              webrtcSessionRef.current = next;
+              return next;
+            });
+            return;
+          }
+
+          if (payload.type === 'participant.left') {
+            const data = (payload.data ?? {}) as Record<string, unknown>;
+            const rawChannelId = data.channel_id;
+            const rawUserId = data.user_id;
+
+            const channelId =
+              typeof rawChannelId === 'number'
+                ? rawChannelId
+                : typeof rawChannelId === 'string'
+                  ? Number(rawChannelId)
+                  : Number.NaN;
+            const userId =
+              typeof rawUserId === 'number'
+                ? rawUserId
+                : typeof rawUserId === 'string'
+                  ? Number(rawUserId)
+                  : Number.NaN;
+
+            if (!Number.isFinite(channelId) || !Number.isFinite(userId)) {
+              return;
+            }
+
+            let removedSelf = false;
+
+            setWebrtcState((previous) => {
+              if (!previous || previous.channelId !== channelId) {
+                return previous;
+              }
+
+              if (previous.participant.user_id === userId) {
+                removedSelf = true;
+                return null;
+              }
+
+              const nextParticipants = removeParticipantById(previous.participants, userId);
+              const next: WebRTCSessionState = {
+                ...previous,
+                participants: nextParticipants,
+              };
+              webrtcSessionRef.current = next;
+              return next;
+            });
+
+            if (removedSelf) {
+              pendingWebRTCAuthRef.current = null;
+              webrtcSessionRef.current = null;
+              setWebrtcError((current) => current ?? 'You left the audio channel.');
+            }
             return;
           }
 
@@ -1068,6 +1505,14 @@ const ChatPage: React.FC = () => {
               });
             return;
           }
+          if (
+            payload.type === 'webrtc.offer' ||
+            payload.type === 'webrtc.answer' ||
+            payload.type === 'webrtc.ice_candidate'
+          ) {
+            console.debug('Received signaling payload', payload.type, payload.data);
+            return;
+          }
         } catch (error) {
           console.warn('Failed to parse websocket payload', error);
         }
@@ -1085,6 +1530,23 @@ const ChatPage: React.FC = () => {
               channel_id: activeChannelId,
             })
           );
+        }
+
+        const activeSession = webrtcSessionRef.current;
+        if (activeSession) {
+          authenticateWebRTCSession(activeSession);
+        } else if (pendingWebRTCAuthRef.current) {
+          const pending = pendingWebRTCAuthRef.current;
+          const sent = sendWebSocketMessage({
+            type: 'session.authenticate',
+            data: {
+              session_token: pending.sessionToken,
+              channel_id: pending.channelId,
+            },
+          });
+          if (sent) {
+            pendingWebRTCAuthRef.current = null;
+          }
         }
       };
 
@@ -1138,7 +1600,16 @@ const ChatPage: React.FC = () => {
       setWsStatus('error');
       scheduleReconnect();
     }
-  }, [normalizeChannelList, scheduleReconnect, clearRetryTimeout, wsRetryCount]);
+  }, [
+    normalizeChannelList,
+    scheduleReconnect,
+    clearRetryTimeout,
+    wsRetryCount,
+    authenticateWebRTCSession,
+    sendWebSocketMessage,
+    updateWebRTCState,
+    setAutoScrollOnNextRender,
+  ]);
 
   useEffect(() => {
     const handleOffline = () => {
@@ -1384,7 +1855,7 @@ const ChatPage: React.FC = () => {
         }
       }
     },
-    [selectedChannel]
+    [selectedChannel, setAutoScrollOnNextRender]
   );
 
   const handleFileInputChange = useCallback(
@@ -1564,6 +2035,87 @@ const ChatPage: React.FC = () => {
     setPreviewAttachment(attachment);
   }, []);
 
+  const handleOpenCreateChannel = useCallback(() => {
+    if (!selectedServer || !canManageChannels) {
+      return;
+    }
+
+    setCreateChannelForm({ name: '', description: '', type: 'text' });
+    setCreateChannelError('');
+    setIsCreateChannelOpen(true);
+  }, [selectedServer, canManageChannels]);
+
+  const handleCloseCreateChannel = useCallback(() => {
+    setIsCreateChannelOpen(false);
+    setCreateChannelError('');
+  }, []);
+
+  const handleCreateChannelNameChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const { value } = event.target;
+    setCreateChannelForm((previous) => ({ ...previous, name: value }));
+  }, []);
+
+  const handleCreateChannelDescriptionChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    const { value } = event.target;
+    setCreateChannelForm((previous) => ({ ...previous, description: value }));
+  }, []);
+
+  const handleCreateChannelTypeChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    const next = event.target.value === 'audio' ? 'audio' : 'text';
+    setCreateChannelForm((previous) => ({ ...previous, type: next }));
+  }, []);
+
+  const handleCreateChannelSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+
+      if (!selectedServer || !canManageChannels) {
+        return;
+      }
+
+      const trimmedName = createChannelForm.name.trim();
+      const trimmedDescription = createChannelForm.description.trim();
+
+      if (!trimmedName) {
+        setCreateChannelError('Channel name is required.');
+        return;
+      }
+
+      setIsCreatingChannel(true);
+      setCreateChannelError('');
+
+      try {
+        const response = await channelsAPI.createChannel({
+          name: trimmedName,
+          description: trimmedDescription.length > 0 ? trimmedDescription : undefined,
+          type: createChannelForm.type,
+          server_id: selectedServer.id,
+        });
+
+        const newChannel = response.data.channel;
+        setChannels((previous) => normalizeChannelList([...previous, newChannel]));
+        setSelectedChannel(newChannel);
+        setIsCreateChannelOpen(false);
+        setCreateChannelForm({ name: '', description: '', type: 'text' });
+      } catch (submitError) {
+        let message = 'Failed to create channel';
+        if (typeof submitError === 'object' && submitError !== null && 'response' in submitError) {
+          const responseData = (submitError as {
+            response?: { data?: { error?: string; message?: string } };
+          }).response?.data;
+          message = responseData?.error || responseData?.message || message;
+        } else if (submitError instanceof Error) {
+          message = submitError.message;
+        }
+
+        setCreateChannelError(message);
+      } finally {
+        setIsCreatingChannel(false);
+      }
+    },
+    [selectedServer, canManageChannels, createChannelForm, normalizeChannelList]
+  );
+
   const renderAttachment = useCallback(
     (attachment: MessageAttachment) => {
       const isImage = (attachment.content_type || '').startsWith('image/');
@@ -1572,41 +2124,12 @@ const ChatPage: React.FC = () => {
       const previewSource = attachment.preview_url || attachment.url;
 
       if (isVideo) {
-        if (!previewSource) {
-          return (
-            <VideoAttachmentPlayer
-              key={attachment.id}
-              attachment={attachment}
-              formatFileSize={formatFileSize}
-            />
-          );
-        }
-
         return (
-          <button
+          <VideoAttachmentPlayer
             key={attachment.id}
-            type="button"
-            onClick={() => handlePreviewAttachment(attachment)}
-            className="group block overflow-hidden rounded-lg border border-slate-800/70 bg-slate-950/60 text-left shadow-sm shadow-slate-900/30 transition hover:border-primary-400/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-          >
-            <div className="relative">
-              <img
-                src={previewSource}
-                alt={`${attachment.file_name} thumbnail`}
-                loading="lazy"
-                className="max-h-64 w-full object-cover"
-              />
-              <span className="absolute inset-0 flex items-center justify-center bg-slate-950/40 text-white opacity-0 transition group-hover:opacity-100">
-                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-950/80 text-2xl">
-                  ▶
-                </span>
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3 border-t border-slate-800/70 bg-slate-950/80 px-3 py-2 text-xs text-slate-300">
-              <span className="truncate">{attachment.file_name}</span>
-              <span className="font-mono text-[10px] text-slate-500">{sizeLabel}</span>
-            </div>
-          </button>
+            attachment={attachment}
+            formatFileSize={formatFileSize}
+          />
         );
       }
 
@@ -1654,6 +2177,14 @@ const ChatPage: React.FC = () => {
       );
     },
     [formatFileSize, handlePreviewAttachment]
+  );
+
+  const previewAttachmentIsVideo = Boolean(
+    previewAttachment && (previewAttachment.content_type || '').startsWith('video/')
+  );
+
+  const previewAttachmentIsImage = Boolean(
+    previewAttachment && (previewAttachment.content_type || '').startsWith('image/')
   );
 
   const handleManualReconnect = useCallback(() => {
@@ -1853,6 +2384,14 @@ const ChatPage: React.FC = () => {
     return groups;
   }, [filteredMessages]);
 
+  const audioParticipants = useMemo(() => {
+    if (!webrtcState) {
+      return [] as WebRTCParticipant[];
+    }
+
+    return normalizeParticipantRoster([webrtcState.participant, ...webrtcState.participants]);
+  }, [webrtcState]);
+
   useEffect(() => {
     const container = messageListRef.current;
     if (!container) {
@@ -1907,6 +2446,30 @@ const ChatPage: React.FC = () => {
       container.removeEventListener('load', handleMediaLoad, true);
     };
   }, [ensurePinnedToBottom]);
+
+  const webrtcStatusLabel = useMemo(() => {
+    if (!webrtcState) {
+      return 'Not connected';
+    }
+
+    switch (webrtcState.status) {
+      case 'connected':
+        return 'Connected';
+      case 'authenticating':
+        return 'Joining…';
+      case 'error':
+        return 'Error';
+      default:
+        return 'Not connected';
+    }
+  }, [webrtcState]);
+  const isWebRTCConnected = webrtcState?.status === 'connected';
+  const isCurrentAudioSession = Boolean(
+    webrtcState && selectedChannel && webrtcState.channelId === selectedChannel.id
+  );
+  const showJoinAudioButton = !isCurrentAudioSession || webrtcState?.status === 'error';
+  const showLeaveAudioButton = isCurrentAudioSession && webrtcState?.status !== 'error';
+  const joinAudioDisabled = isJoiningWebRTC || webrtcState?.status === 'authenticating';
 
   const canSendMessages = Boolean(selectedChannel && selectedChannel.type === 'text');
   const messagePlaceholder = selectedChannel
@@ -2016,13 +2579,22 @@ const ChatPage: React.FC = () => {
               </div>
             )}
             {!isLoadingChannels && channels.length === 0 && (
-              <p className="px-2 text-[11px] text-slate-500">No channels yet. Create one from the console.</p>
+              <p className="px-2 text-[11px] text-slate-500">
+                {canManageChannels
+                  ? 'No channels yet. Use "Add Channel" to get started.'
+                  : 'No channels yet. Check back once the server owner creates one.'}
+              </p>
             )}
             {!isLoadingChannels &&
               channels.map((channel) => {
                 const isActive = selectedChannel?.id === channel.id;
-                const isAudioChannel = channel.type === 'audio' || channel.type === 'voice';
+                const isAudioChannel = channel.type === 'audio';
                 const prefix = isAudioChannel ? '🎧' : '#';
+                const isLiveAudio =
+                  isAudioChannel &&
+                  webrtcState &&
+                  webrtcState.channelId === channel.id &&
+                  webrtcState.status === 'connected';
 
                 return (
                   <button
@@ -2043,20 +2615,63 @@ const ChatPage: React.FC = () => {
                       <span className="text-[11px] text-slate-500">{channel.description}</span>
                     )}
                     {isAudioChannel && (
-                      <span className="text-[10px] uppercase tracking-[0.3em] text-emerald-300/70">audio soon</span>
+                      <span
+                        className={`text-[10px] uppercase tracking-[0.3em] ${
+                          isLiveAudio ? 'text-emerald-300' : 'text-emerald-300/70'
+                        }`}
+                      >
+                        {isLiveAudio ? 'live' : 'audio'}
+                      </span>
                     )}
                   </button>
                 );
               })}
+            {!isLoadingChannels && canManageChannels && selectedServer && (
+              <div className="mt-5 space-y-3 px-2">
+                <div className="h-px bg-slate-800/60" />
+              <button
+                type="button"
+                onClick={handleOpenCreateChannel}
+                className="flex w-full flex-col gap-1 rounded-lg border border-dashed border-slate-800/60 bg-slate-950/60 px-3 py-3 text-left text-slate-400 transition hover:border-primary-400/60 hover:bg-slate-900/70 hover:text-primary-100"
+              >
+                <span className="flex items-center gap-3 text-sm font-medium text-slate-300">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-900 text-base text-slate-400">
+                    +
+                  </span>
+                  Create a channel
+                </span>
+                <span className="text-[11px] text-slate-500">Organize conversations by adding text or audio rooms.</span>
+              </button>
+              </div>
+            )}
           </nav>
 
-          <div className="mt-8 rounded-lg border border-slate-800/70 bg-slate-950/70 px-3 py-3">
-            <p className="text-[10px] uppercase tracking-[0.35em] text-slate-500">shortcuts</p>
-            <ul className="mt-2 space-y-1 font-mono text-[11px] text-slate-400">
-              <li>⌘K &nbsp; Switch channel</li>
-              <li>/log &nbsp; Tail recent activity</li>
-              <li>⌘⇧P &nbsp; Command palette</li>
-            </ul>
+          <div className="mt-8 rounded-lg border border-slate-800/70 bg-slate-950/70 px-3 py-3 text-[11px] text-slate-400">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-500">debug info</p>
+            <dl className="space-y-1">
+              <div className="flex justify-between gap-2">
+                <dt className="text-slate-500">Auth user</dt>
+                <dd className="truncate text-slate-200">
+                  {currentUser ? `${currentUser.username} (#${currentUser.id})` : 'unknown'}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-slate-500">Server role</dt>
+                <dd className="truncate text-slate-200">
+                  {selectedServer ? selectedServer.current_member_role ?? 'unknown' : 'n/a'}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-slate-500">Can manage</dt>
+                <dd className="truncate text-slate-200">{canManageChannels ? 'yes' : 'no'}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-slate-500">Server owner</dt>
+                <dd className="truncate text-slate-200">
+                  {selectedServer ? `#${selectedServer.owner_id}` : 'n/a'}
+                </dd>
+              </div>
+            </dl>
           </div>
         </aside>
 
@@ -2114,10 +2729,111 @@ const ChatPage: React.FC = () => {
                     </div>
                   )}
 
-                  {selectedChannel && selectedChannel.type !== 'text' && (
-                    <div className="rounded-3xl border border-emerald-500/40 bg-emerald-500/5 px-6 py-10 text-center text-emerald-100">
-                      <h3 className="text-lg font-semibold">{EMPTY_STATES.audioChannel.title}</h3>
-                      <p className="mt-2 text-sm text-emerald-200/80">{EMPTY_STATES.audioChannel.body}</p>
+                  {selectedChannel && selectedChannel.type === 'audio' && (
+                    <div className="rounded-3xl border border-emerald-500/40 bg-emerald-500/5 px-6 py-8 text-emerald-100">
+                      <header className="flex flex-col gap-2 text-left">
+                        <span className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-300/80">
+                          Audio Channel
+                        </span>
+                        <h3 className="text-2xl font-semibold text-white">🎧 #{selectedChannel.name}</h3>
+                        <p className="text-sm text-emerald-200/80">{EMPTY_STATES.audioChannel.body}</p>
+                      </header>
+
+                      <div className="mt-6 flex flex-col gap-5 lg:flex-row">
+                        <section className="flex-1">
+                          <div className="rounded-2xl border border-emerald-400/30 bg-slate-950/40 p-5 shadow-lg shadow-emerald-500/10 backdrop-blur">
+                            <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.3em] text-emerald-300/80">
+                              <span>Status</span>
+                              <span className="font-mono text-emerald-100">{webrtcStatusLabel}</span>
+                            </div>
+                            <div className="mt-4 space-y-3">
+                              {audioParticipants.length === 0 ? (
+                                <p className="text-sm text-emerald-100/80">
+                                  Nobody is connected yet. Join to open the floor.
+                                </p>
+                              ) : (
+                                <ul className="space-y-3">
+                                  {audioParticipants.map((participant) => {
+                                    const isSelf = currentUser?.id === participant.user_id;
+                                    const micState = participant.media_state?.mic === 'on' ? 'on' : 'off';
+                                    const cameraState = participant.media_state?.camera === 'on' ? 'on' : 'off';
+
+                                    return (
+                                      <li
+                                        key={participant.user_id}
+                                        className="flex items-center justify-between rounded-xl border border-emerald-400/40 bg-slate-950/50 px-4 py-3 shadow-md shadow-emerald-500/10"
+                                      >
+                                        <div>
+                                          <p className="text-sm font-semibold text-white">
+                                            {participant.display_name || `Member #${participant.user_id}`}{' '}
+                                            {isSelf && <span className="ml-2 rounded-full bg-emerald-400/20 px-2 py-[1px] text-[10px] font-semibold uppercase tracking-wide text-emerald-200">You</span>}
+                                          </p>
+                                          <p className="text-[11px] text-emerald-200/70">
+                                            {participant.role ? participant.role : 'member'}
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-3 text-[11px] font-mono text-emerald-200/80">
+                                          <span className={micState === 'on' ? 'text-emerald-200' : 'text-emerald-200/60'}>
+                                            mic:{micState}
+                                          </span>
+                                          <span className={cameraState === 'on' ? 'text-emerald-200' : 'text-emerald-200/60'}>
+                                            cam:{cameraState}
+                                          </span>
+                                        </div>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )}
+                            </div>
+                          </div>
+                        </section>
+
+                        <section className="w-full max-w-xs space-y-4">
+                          {webrtcError && (
+                            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                              {webrtcError}
+                            </div>
+                          )}
+
+                          <div className="rounded-2xl border border-emerald-400/30 bg-slate-950/40 p-5 shadow-lg shadow-emerald-500/10 backdrop-blur">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300/80">
+                              Actions
+                            </p>
+                            <div className="mt-4 space-y-3">
+                              {showJoinAudioButton && (
+                                <button
+                                  type="button"
+                                  onClick={handleJoinAudioChannel}
+                                  disabled={joinAudioDisabled}
+                                  className="w-full rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-md shadow-emerald-500/40 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-400/60"
+                                >
+                                  {joinAudioDisabled ? 'Joining…' : 'Join audio channel'}
+                                </button>
+                              )}
+
+                              {showLeaveAudioButton && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleLeaveAudioChannel();
+                                  }}
+                                  disabled={isJoiningWebRTC}
+                                  className="w-full rounded-xl border border-emerald-400/60 bg-transparent px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:border-emerald-300 hover:text-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-400/40 disabled:text-emerald-200/60"
+                                >
+                                  Leave channel
+                                </button>
+                              )}
+
+                              {!isWebRTCConnected && !showJoinAudioButton && !showLeaveAudioButton && (
+                                <p className="text-[11px] text-emerald-200/70">
+                                  Waiting for realtime connection…
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </section>
+                      </div>
                     </div>
                   )}
 
@@ -2321,6 +3037,109 @@ const ChatPage: React.FC = () => {
         </main>
       </div>
 
+      {isCreateChannelOpen && canManageChannels && selectedServer && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/90 px-6 py-12 backdrop-blur"
+          onClick={handleCloseCreateChannel}
+        >
+          <div
+            className="relative w-full max-w-lg rounded-2xl border border-slate-800/80 bg-slate-900/95 p-6 shadow-2xl shadow-slate-950/70"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="mb-5 flex items-start justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.35em] text-slate-500">New channel</p>
+                <h2 className="mt-1 text-xl font-semibold text-white">Add a channel</h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  Create a new space for your team to chat or hang out in {selectedServer.name}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseCreateChannel}
+                className="rounded-full bg-slate-900/70 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                aria-label="Close create channel dialog"
+              >
+                ×
+              </button>
+            </header>
+
+            <form onSubmit={handleCreateChannelSubmit} className="space-y-5">
+              <div className="space-y-2">
+                <label htmlFor="create-channel-name" className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+                  Channel name
+                </label>
+                <input
+                  id="create-channel-name"
+                  type="text"
+                  value={createChannelForm.name}
+                  onChange={handleCreateChannelNameChange}
+                  placeholder="general"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                  autoFocus
+                  disabled={isCreatingChannel}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="create-channel-description" className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+                  Description <span className="text-slate-500/60 normal-case">(optional)</span>
+                </label>
+                <textarea
+                  id="create-channel-description"
+                  value={createChannelForm.description}
+                  onChange={handleCreateChannelDescriptionChange}
+                  placeholder="A quick summary of what this channel is for"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                  rows={3}
+                  disabled={isCreatingChannel}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="create-channel-type" className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+                  Channel type
+                </label>
+                <select
+                  id="create-channel-type"
+                  value={createChannelForm.type}
+                  onChange={handleCreateChannelTypeChange}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                  disabled={isCreatingChannel}
+                >
+                  <option value="text">Text channel</option>
+                  <option value="audio">Audio channel</option>
+                </select>
+              </div>
+
+              {createChannelError && (
+                <p className="text-sm text-red-400">{createChannelError}</p>
+              )}
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={handleCloseCreateChannel}
+                  className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                  disabled={isCreatingChannel}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+                  disabled={isCreatingChannel}
+                >
+                  {isCreatingChannel ? 'Creating…' : 'Create channel'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {previewAttachment && (
         <div
           role="dialog"
@@ -2336,17 +3155,26 @@ const ChatPage: React.FC = () => {
               type="button"
               onClick={handleClosePreview}
               className="absolute right-4 top-4 rounded-full bg-slate-900/80 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-              aria-label="Close image preview"
+              aria-label="Close attachment preview"
             >
               X
             </button>
 
-            <div className="flex items-center justify-center bg-slate-950">
-              <img
-                src={previewAttachment.url}
-                alt={previewAttachment.file_name}
-                className="max-h-[80vh] w-full object-contain"
-              />
+            <div className="flex items-center justify-center bg-slate-950 p-4">
+              {previewAttachmentIsVideo ? (
+                <div className="w-full max-w-4xl">
+                  <VideoAttachmentPlayer
+                    attachment={previewAttachment}
+                    formatFileSize={formatFileSize}
+                  />
+                </div>
+              ) : (
+                <img
+                  src={previewAttachment.url}
+                  alt={previewAttachment.file_name}
+                  className="max-h-[80vh] w-full object-contain"
+                />
+              )}
             </div>
 
             <div className="flex flex-col gap-3 border-t border-slate-800/70 bg-slate-950/95 px-6 py-4 text-slate-300">
@@ -2357,13 +3185,24 @@ const ChatPage: React.FC = () => {
                     {(previewAttachment.content_type || 'image')} · {formatFileSize(previewAttachment.file_size)}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => window.open(previewAttachment.url, '_blank', 'noopener,noreferrer')}
-                  className="rounded-md bg-primary-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                >
-                  View Original
-                </button>
+                {previewAttachmentIsImage && (
+                  <button
+                    type="button"
+                    onClick={() => window.open(previewAttachment.url, '_blank', 'noopener,noreferrer')}
+                    className="rounded-md bg-primary-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                  >
+                    View Original
+                  </button>
+                )}
+                {previewAttachmentIsVideo && (
+                  <button
+                    type="button"
+                    onClick={() => window.open(previewAttachment.url, '_blank', 'noopener,noreferrer')}
+                    className="rounded-md bg-primary-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                  >
+                    Open Original
+                  </button>
+                )}
               </div>
             </div>
           </div>
