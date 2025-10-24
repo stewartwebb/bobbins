@@ -124,6 +124,46 @@ const IconVolumeMute: React.FC<IconProps> = ({ className = 'h-4 w-4' }) => (
   </svg>
 );
 
+const IconMic: React.FC<IconProps> = ({ className = 'h-5 w-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" />
+    <path d="M19 12a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12z" />
+  </svg>
+);
+
+const IconMicOff: React.FC<IconProps> = ({ className = 'h-5 w-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M15 11.59 17.59 14A5 5 0 0 0 19 12a1 1 0 0 0-2 0 3 3 0 0 1-.35 1.42L15 10.77V6a3 3 0 0 0-5.74-.99l1.58 1.58A1 1 0 0 1 12 6a1 1 0 0 1 1 1v2.59l2 2z" />
+    <path d="M5.11 4.7 3.7 6.11l3.2 3.2V12a5 5 0 0 0 4 4.9V21h2v-2.1a7.05 7.05 0 0 0 3.68-1.77l2.2 2.2 1.41-1.42zm6.89 9.59a3 3 0 0 1-3-3v-.8l3.59 3.59a2.95 2.95 0 0 1-.59.21z" />
+  </svg>
+);
+
+const IconVideo: React.FC<IconProps> = ({ className = 'h-5 w-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M4 6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1.382l3.553-1.777A1 1 0 0 1 20 6.53v10.94a1 1 0 0 1-1.447.925L15 16.618V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6z" />
+  </svg>
+);
+
+const IconVideoOff: React.FC<IconProps> = ({ className = 'h-5 w-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M4 6.828 2.11 5l1.41-1.414 17.38 17.381L19.49 22 17 19.51A2 2 0 0 1 15 20H6a2 2 0 0 1-2-2z" />
+    <path d="M22 7.5v9l-4.5-2.25v-1.973L9.723 5H15a2 2 0 0 1 2 2v1.382l3.553-1.777A1 1 0 0 1 22 7.5z" />
+  </svg>
+);
+
+const IconPhone: React.FC<IconProps> = ({ className = 'h-5 w-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1.004 1.004 0 0 1 1.02-.24 11.36 11.36 0 0 0 3.56.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 6a1 1 0 0 1 1-1h3.53a1 1 0 0 1 1 1 11.36 11.36 0 0 0 .57 3.56 1 1 0 0 1-.24 1.02z" />
+  </svg>
+);
+
+const IconScreenShare: React.FC<IconProps> = ({ className = 'h-5 w-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M4 5a2 2 0 0 0-2 2v9h20V7a2 2 0 0 0-2-2zM2 18h20v2H2z" />
+    <path d="M11.47 11.47 10 10v4l1.47-1.47L14 15v-4z" />
+  </svg>
+);
+
 const IconFullscreenEnter: React.FC<IconProps> = ({ className = 'h-4 w-4' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
     <path d="M4 4h6v2H6v4H4V4zm14 0v6h-2V6h-4V4h6zm0 16h-6v-2h4v-4h2v6zM4 20v-6h2v4h4v2H4z" />
@@ -531,6 +571,38 @@ const upsertParticipant = (participants: WebRTCParticipant[], next: WebRTCPartic
 const removeParticipantById = (participants: WebRTCParticipant[], userId: number): WebRTCParticipant[] =>
   participants.filter((entry) => entry.user_id !== userId);
 
+const parseNumericId = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const extractIceServers = (source: unknown): RTCIceServer[] | undefined => {
+  if (!source) {
+    return undefined;
+  }
+
+  if (Array.isArray(source)) {
+    return source as RTCIceServer[];
+  }
+
+  if (typeof source === 'object') {
+    const maybe = source as { iceServers?: unknown };
+    if (Array.isArray(maybe.iceServers)) {
+      return maybe.iceServers as RTCIceServer[];
+    }
+  }
+
+  return undefined;
+};
+
 const ChatPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -571,6 +643,9 @@ const ChatPage: React.FC = () => {
   const [webrtcState, setWebrtcState] = useState<WebRTCSessionState | null>(null);
   const [isJoiningWebRTC, setIsJoiningWebRTC] = useState(false);
   const [webrtcError, setWebrtcError] = useState<string | null>(null);
+  const [localMediaState, setLocalMediaState] = useState<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
+  const [remoteMediaStreams, setRemoteMediaStreams] = useState<Record<number, MediaStream>>({});
+  const [mediaPermissionError, setMediaPermissionError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const selectedServerIdRef = useRef<number | null>(null);
@@ -594,6 +669,13 @@ const ChatPage: React.FC = () => {
   const previousChannelIdRef = useRef<number | null>(null);
   const webrtcSessionRef = useRef<WebRTCSessionState | null>(null);
   const pendingWebRTCAuthRef = useRef<{ sessionToken: string; channelId: number } | null>(null);
+  const localMediaStreamRef = useRef<MediaStream | null>(null);
+  const peerConnectionsRef = useRef<Map<number, RTCPeerConnection>>(new Map());
+  const remoteStreamsRef = useRef<Map<number, MediaStream>>(new Map());
+  const pendingCandidatesRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
+  const remoteMediaElementsRef = useRef<Map<number, HTMLVideoElement>>(new Map());
+  const localPreviewRef = useRef<HTMLVideoElement | null>(null);
+  const localMediaStateRef = useRef<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
 
   const normalizeChannelList = useCallback(
     (list: Channel[]) =>
@@ -619,6 +701,10 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     selectedServerIdRef.current = selectedServer?.id ?? null;
   }, [selectedServer?.id]);
+
+  useEffect(() => {
+    localMediaStateRef.current = localMediaState;
+  }, [localMediaState]);
 
   useEffect(() => {
     selectedChannelIdRef.current = selectedChannel?.id ?? null;
@@ -821,11 +907,538 @@ const ChatPage: React.FC = () => {
     []
   );
 
+  const teardownWebRTCSession = useCallback(() => {
+    peerConnectionsRef.current.forEach((connection) => {
+      try {
+        connection.onicecandidate = null;
+        connection.ontrack = null;
+        connection.onnegotiationneeded = null;
+        connection.onconnectionstatechange = null;
+        connection.getSenders().forEach((sender) => {
+          try {
+            connection.removeTrack(sender);
+          } catch (removeError) {
+            console.debug('Failed to remove track during teardown', removeError);
+          }
+        });
+        connection.close();
+      } catch (closeError) {
+        console.debug('Peer connection teardown error', closeError);
+      }
+    });
+
+    peerConnectionsRef.current.clear();
+    pendingCandidatesRef.current.clear();
+
+    remoteStreamsRef.current.forEach((stream) => {
+      stream.getTracks().forEach((track) => track.stop());
+    });
+    remoteStreamsRef.current.clear();
+
+    remoteMediaElementsRef.current.forEach((element) => {
+      element.srcObject = null;
+    });
+    remoteMediaElementsRef.current.clear();
+
+    setRemoteMediaStreams({});
+
+    const localStream = localMediaStreamRef.current;
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+      localMediaStreamRef.current = null;
+    }
+
+    if (localPreviewRef.current) {
+      localPreviewRef.current.srcObject = null;
+    }
+
+    setLocalMediaState(DEFAULT_MEDIA_STATE);
+    setMediaPermissionError(null);
+  }, []);
+
+  const updateLocalMediaState = useCallback(
+    (patch: Partial<WebRTCMediaState>, options: { broadcast?: boolean } = {}) => {
+      setLocalMediaState((previous) => {
+        const base = mergeMediaState(DEFAULT_MEDIA_STATE, previous);
+        const next: WebRTCMediaState = {
+          mic: patch.mic ?? base.mic,
+          camera: patch.camera ?? base.camera,
+          screen: patch.screen ?? base.screen,
+        };
+
+        if (next.mic === base.mic && next.camera === base.camera && next.screen === base.screen) {
+          return previous;
+        }
+
+        if (options.broadcast !== false) {
+          sendWebSocketMessage({
+            type: 'participant.update',
+            data: {
+              media_state: next,
+            },
+          });
+
+          updateWebRTCState((session) => {
+            if (!session) {
+              return session;
+            }
+
+            const nextParticipant: WebRTCParticipant = {
+              ...session.participant,
+              media_state: mergeMediaState(session.participant.media_state, next),
+            };
+
+            const updatedParticipants = session.participants.map((entry) =>
+              entry.user_id === nextParticipant.user_id
+                ? { ...entry, media_state: mergeMediaState(entry.media_state, next) }
+                : entry
+            );
+
+            return {
+              ...session,
+              participant: nextParticipant,
+              participants: updatedParticipants,
+            };
+          });
+        }
+
+        return next;
+      });
+    },
+    [sendWebSocketMessage, updateWebRTCState]
+  );
+
+  const ensureLocalMedia = useCallback(
+    async (options: { video?: boolean } = {}): Promise<MediaStream | null> => {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        setMediaPermissionError('Media capture is not supported in this browser.');
+        return null;
+      }
+
+      const wantsVideo = Boolean(options.video);
+      let stream = localMediaStreamRef.current;
+
+      try {
+        if (!stream) {
+          const constraints: MediaStreamConstraints = {
+            audio: true,
+            video: wantsVideo
+              ? {
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                }
+              : false,
+          };
+
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          localMediaStreamRef.current = stream;
+          setMediaPermissionError(null);
+
+          stream.getAudioTracks().forEach((track) => {
+            track.enabled = true;
+          });
+
+          stream.getVideoTracks().forEach((track) => {
+            track.enabled = wantsVideo;
+            track.onended = () => {
+              updateLocalMediaState({ camera: 'off' }, { broadcast: true });
+            };
+          });
+        } else if (wantsVideo && stream.getVideoTracks().length === 0) {
+          const additionalStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          });
+
+          const [videoTrack] = additionalStream.getVideoTracks();
+          additionalStream.getTracks().forEach((track) => {
+            if (track !== videoTrack) {
+              track.stop();
+            }
+          });
+
+          if (videoTrack) {
+            videoTrack.enabled = true;
+            videoTrack.onended = () => {
+              updateLocalMediaState({ camera: 'off' }, { broadcast: true });
+            };
+            stream.addTrack(videoTrack);
+
+            peerConnectionsRef.current.forEach((connection) => {
+              const alreadySending = connection
+                .getSenders()
+                .some((sender) => sender.track?.kind === videoTrack.kind);
+              if (!alreadySending) {
+                connection.addTrack(videoTrack, stream as MediaStream);
+              }
+            });
+          }
+        }
+
+        const previewElement = localPreviewRef.current;
+        if (previewElement && stream && previewElement.srcObject !== stream) {
+          previewElement.srcObject = stream;
+          previewElement.muted = true;
+          previewElement.playsInline = true;
+        }
+
+        return stream ?? null;
+      } catch (captureError) {
+        console.warn('Failed to access media devices', captureError);
+        if (!stream) {
+          setMediaPermissionError('Microphone or camera access was denied. Update permissions to join with audio.');
+        } else if (wantsVideo) {
+          setMediaPermissionError('We could not enable your camera. Please verify browser permissions.');
+        }
+        return null;
+      }
+    },
+    [updateLocalMediaState]
+  );
+
+  const closePeerConnection = useCallback(
+    (userId: number) => {
+      const connection = peerConnectionsRef.current.get(userId);
+      if (!connection) {
+        return;
+      }
+
+      peerConnectionsRef.current.delete(userId);
+      pendingCandidatesRef.current.delete(userId);
+
+      try {
+        connection.onicecandidate = null;
+        connection.ontrack = null;
+        connection.onnegotiationneeded = null;
+        connection.onconnectionstatechange = null;
+        connection.getSenders().forEach((sender) => {
+          try {
+            connection.removeTrack(sender);
+          } catch (removeError) {
+            console.debug('removeTrack failed during close', removeError);
+          }
+        });
+        connection.close();
+      } catch (connectionError) {
+        console.debug('Error closing peer connection', connectionError);
+      }
+
+      const remoteStream = remoteStreamsRef.current.get(userId);
+      if (remoteStream) {
+        remoteStream.getTracks().forEach((track) => track.stop());
+        remoteStreamsRef.current.delete(userId);
+      }
+
+      setRemoteMediaStreams((previous) => {
+        if (!(userId in previous)) {
+          return previous;
+        }
+        const { [userId]: _, ...rest } = previous;
+        return rest;
+      });
+
+      const mediaElement = remoteMediaElementsRef.current.get(userId);
+      if (mediaElement) {
+        mediaElement.srcObject = null;
+        remoteMediaElementsRef.current.delete(userId);
+      }
+    },
+    []
+  );
+
+  const drainPendingIceCandidates = useCallback(async (userId: number, connection: RTCPeerConnection) => {
+    const pending = pendingCandidatesRef.current.get(userId);
+    if (!pending || pending.length === 0) {
+      return;
+    }
+
+    pendingCandidatesRef.current.delete(userId);
+
+    for (const candidate of pending) {
+      try {
+        await connection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (candidateError) {
+        console.warn('Failed to add queued ICE candidate', candidateError);
+      }
+    }
+  }, []);
+
+  const getOrCreatePeerConnection = useCallback(
+    async (targetUserId: number): Promise<RTCPeerConnection | null> => {
+      const session = webrtcSessionRef.current;
+      if (!session || session.status !== 'connected') {
+        return null;
+      }
+
+      const existing = peerConnectionsRef.current.get(targetUserId);
+      if (existing) {
+        return existing;
+      }
+
+      const configuration: RTCConfiguration = {};
+      const iceServers = extractIceServers(session.iceservers);
+      if (iceServers) {
+        configuration.iceServers = iceServers;
+      }
+
+      const connection = new RTCPeerConnection(configuration);
+
+      connection.onicecandidate = (event) => {
+        if (!event.candidate) {
+          return;
+        }
+
+        const candidate = event.candidate.toJSON();
+        sendWebSocketMessage({
+          type: 'webrtc.ice_candidate',
+          data: {
+            target_user_id: targetUserId,
+            candidate: candidate.candidate,
+            sdp_mid: candidate.sdpMid,
+            sdp_mline_index: candidate.sdpMLineIndex,
+          },
+        });
+      };
+
+      connection.ontrack = (event) => {
+        const [stream] = event.streams;
+        if (!stream) {
+          return;
+        }
+
+        remoteStreamsRef.current.set(targetUserId, stream);
+        setRemoteMediaStreams((previous) => {
+          if (previous[targetUserId] === stream) {
+            return previous;
+          }
+          return { ...previous, [targetUserId]: stream };
+        });
+      };
+
+      connection.onconnectionstatechange = () => {
+        const state = connection.connectionState;
+        if (state === 'failed' || state === 'closed') {
+          closePeerConnection(targetUserId);
+        }
+      };
+
+      connection.onnegotiationneeded = async () => {
+        if (connection.signalingState !== 'stable') {
+          return;
+        }
+
+        const currentUserId = currentUserIdRef.current;
+        if (!currentUserId || currentUserId > targetUserId) {
+          return;
+        }
+
+        try {
+          const offer = await connection.createOffer();
+          await connection.setLocalDescription(offer);
+          sendWebSocketMessage({
+            type: 'webrtc.offer',
+            data: {
+              target_user_id: targetUserId,
+              sdp: offer.sdp,
+              type: offer.type,
+            },
+          });
+        } catch (offerError) {
+          console.warn('Failed to negotiate WebRTC offer', offerError);
+        }
+      };
+
+      peerConnectionsRef.current.set(targetUserId, connection);
+
+      const wantsVideo = localMediaStateRef.current.camera === 'on';
+      const localStream = await ensureLocalMedia({ video: wantsVideo });
+      if (localStream) {
+        localStream.getTracks().forEach((track) => {
+          const alreadySending = connection.getSenders().some((sender) => sender.track === track);
+          if (!alreadySending) {
+            connection.addTrack(track, localStream);
+          }
+        });
+      }
+
+      return connection;
+    },
+    [closePeerConnection, ensureLocalMedia, sendWebSocketMessage]
+  );
+
+  const handleIncomingOffer = useCallback(
+    async (data: Record<string, unknown>) => {
+      const fromUserId = parseNumericId(data.from_user_id);
+      const sdp = typeof data.sdp === 'string' ? data.sdp : null;
+      const type = typeof data.type === 'string' ? (data.type as RTCSdpType) : 'offer';
+
+      if (!fromUserId || !sdp) {
+        return;
+      }
+
+      const connection = await getOrCreatePeerConnection(fromUserId);
+      if (!connection) {
+        return;
+      }
+
+      try {
+        await connection.setRemoteDescription({ type, sdp });
+      } catch (descriptionError) {
+        console.warn('Failed to apply remote offer', descriptionError);
+        return;
+      }
+
+      await drainPendingIceCandidates(fromUserId, connection);
+
+      try {
+        const answer = await connection.createAnswer();
+        await connection.setLocalDescription(answer);
+        sendWebSocketMessage({
+          type: 'webrtc.answer',
+          data: {
+            target_user_id: fromUserId,
+            sdp: answer.sdp,
+            type: answer.type,
+          },
+        });
+      } catch (answerError) {
+        console.warn('Failed to create WebRTC answer', answerError);
+      }
+    },
+    [drainPendingIceCandidates, getOrCreatePeerConnection, sendWebSocketMessage]
+  );
+
+  const handleIncomingAnswer = useCallback(
+    async (data: Record<string, unknown>) => {
+      const fromUserId = parseNumericId(data.from_user_id);
+      const sdp = typeof data.sdp === 'string' ? data.sdp : null;
+      const type = typeof data.type === 'string' ? (data.type as RTCSdpType) : 'answer';
+
+      if (!fromUserId || !sdp) {
+        return;
+      }
+
+      const connection = peerConnectionsRef.current.get(fromUserId);
+      if (!connection) {
+        return;
+      }
+
+      try {
+        await connection.setRemoteDescription({ type, sdp });
+        await drainPendingIceCandidates(fromUserId, connection);
+      } catch (answerError) {
+        console.warn('Failed to apply remote answer', answerError);
+      }
+    },
+    [drainPendingIceCandidates]
+  );
+
+  const handleIncomingCandidate = useCallback(
+    async (data: Record<string, unknown>) => {
+      const fromUserId = parseNumericId(data.from_user_id);
+      const candidateValue = typeof data.candidate === 'string' ? data.candidate : null;
+      if (!fromUserId || !candidateValue) {
+        return;
+      }
+
+      const candidate: RTCIceCandidateInit = {
+        candidate: candidateValue,
+      };
+
+      if (typeof data.sdp_mid === 'string') {
+        candidate.sdpMid = data.sdp_mid;
+      } else if (typeof data.sdpMid === 'string') {
+        candidate.sdpMid = data.sdpMid;
+      }
+
+      if (typeof data.sdp_mline_index === 'number') {
+        candidate.sdpMLineIndex = data.sdp_mline_index;
+      } else if (typeof data.sdpMLineIndex === 'number') {
+        candidate.sdpMLineIndex = data.sdpMLineIndex;
+      } else if (typeof data.sdp_mline_index === 'string') {
+        const parsed = Number(data.sdp_mline_index);
+        if (Number.isFinite(parsed)) {
+          candidate.sdpMLineIndex = parsed;
+        }
+      }
+
+      const connection = peerConnectionsRef.current.get(fromUserId);
+      if (!connection || !connection.remoteDescription) {
+        const queued = pendingCandidatesRef.current.get(fromUserId) ?? [];
+        queued.push(candidate);
+        pendingCandidatesRef.current.set(fromUserId, queued);
+        return;
+      }
+
+      try {
+        await connection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (candidateError) {
+        console.warn('Failed to apply ICE candidate', candidateError);
+      }
+    },
+    []
+  );
+
+  const handleToggleMic = useCallback(async () => {
+    const session = webrtcSessionRef.current;
+    if (!session || session.status !== 'connected') {
+      setMediaPermissionError('Join the audio channel before toggling your microphone.');
+      return;
+    }
+
+    const wantsVideo = localMediaStateRef.current.camera === 'on';
+    const stream = await ensureLocalMedia({ video: wantsVideo });
+    if (!stream) {
+      return;
+    }
+
+    const nextMicState: 'on' | 'off' = localMediaStateRef.current.mic === 'on' ? 'off' : 'on';
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = nextMicState === 'on';
+    });
+
+    setMediaPermissionError(null);
+    updateLocalMediaState({ mic: nextMicState }, { broadcast: true });
+  }, [ensureLocalMedia, updateLocalMediaState]);
+
+  const handleToggleCamera = useCallback(async () => {
+    const session = webrtcSessionRef.current;
+    if (!session || session.status !== 'connected') {
+      setMediaPermissionError('Join the audio channel before toggling your camera.');
+      return;
+    }
+
+    const enabling = localMediaStateRef.current.camera !== 'on';
+    const stream = await ensureLocalMedia({ video: enabling });
+    if (!stream) {
+      return;
+    }
+
+    const videoTracks = stream.getVideoTracks();
+    if (enabling && videoTracks.length === 0) {
+      setMediaPermissionError('No camera was detected. Check your device permissions.');
+      return;
+    }
+
+    videoTracks.forEach((track) => {
+      track.enabled = enabling;
+    });
+
+    if (enabling) {
+      setMediaPermissionError(null);
+    }
+
+    updateLocalMediaState({ camera: enabling ? 'on' : 'off' }, { broadcast: true });
+  }, [ensureLocalMedia, updateLocalMediaState]);
+
   const handleJoinAudioChannel = useCallback(async () => {
     if (!selectedChannel || selectedChannel.type !== 'audio' || isJoiningWebRTC) {
       return;
     }
 
+    teardownWebRTCSession();
     setIsJoiningWebRTC(true);
     setWebrtcError(null);
 
@@ -865,7 +1478,7 @@ const ChatPage: React.FC = () => {
     } finally {
       setIsJoiningWebRTC(false);
     }
-  }, [authenticateWebRTCSession, isJoiningWebRTC, selectedChannel, updateWebRTCState]);
+  }, [authenticateWebRTCSession, isJoiningWebRTC, selectedChannel, teardownWebRTCSession, updateWebRTCState]);
 
   const handleLeaveAudioChannel = useCallback(async () => {
     const session = webrtcSessionRef.current;
@@ -873,6 +1486,7 @@ const ChatPage: React.FC = () => {
       updateWebRTCState(() => null);
       setWebrtcError(null);
       setIsJoiningWebRTC(false);
+      teardownWebRTCSession();
       return;
     }
 
@@ -880,6 +1494,7 @@ const ChatPage: React.FC = () => {
     updateWebRTCState(() => null);
     setWebrtcError(null);
     setIsJoiningWebRTC(false);
+    teardownWebRTCSession();
 
     sendWebSocketMessage({
       type: 'session.leave',
@@ -893,7 +1508,7 @@ const ChatPage: React.FC = () => {
     } catch (leaveError) {
       console.debug('Failed to terminate WebRTC session cleanly', leaveError);
     }
-  }, [sendWebSocketMessage, updateWebRTCState]);
+  }, [sendWebSocketMessage, teardownWebRTCSession, updateWebRTCState]);
 
   useEffect(() => () => {
     void handleLeaveAudioChannel();
@@ -1218,6 +1833,7 @@ const ChatPage: React.FC = () => {
               webrtcSessionRef.current = next;
               return next;
             });
+
             return;
           }
 
@@ -1233,6 +1849,7 @@ const ChatPage: React.FC = () => {
 
             pendingWebRTCAuthRef.current = null;
             webrtcSessionRef.current = null;
+            teardownWebRTCSession();
             setWebrtcState(null);
             setWebrtcError(description);
             return;
@@ -1302,6 +1919,11 @@ const ChatPage: React.FC = () => {
               webrtcSessionRef.current = next;
               return next;
             });
+
+            const selfId = currentUserIdRef.current;
+            if (selfId && selfId !== userId) {
+              void getOrCreatePeerConnection(userId);
+            }
             return;
           }
 
@@ -1348,9 +1970,12 @@ const ChatPage: React.FC = () => {
               return next;
             });
 
+            closePeerConnection(userId);
+
             if (removedSelf) {
               pendingWebRTCAuthRef.current = null;
               webrtcSessionRef.current = null;
+              teardownWebRTCSession();
               setWebrtcError((current) => current ?? 'You left the audio channel.');
             }
             return;
@@ -1505,12 +2130,21 @@ const ChatPage: React.FC = () => {
               });
             return;
           }
-          if (
-            payload.type === 'webrtc.offer' ||
-            payload.type === 'webrtc.answer' ||
-            payload.type === 'webrtc.ice_candidate'
-          ) {
-            console.debug('Received signaling payload', payload.type, payload.data);
+          if (payload.type === 'webrtc.offer') {
+            const data = (payload.data ?? {}) as Record<string, unknown>;
+            void handleIncomingOffer(data);
+            return;
+          }
+
+          if (payload.type === 'webrtc.answer') {
+            const data = (payload.data ?? {}) as Record<string, unknown>;
+            void handleIncomingAnswer(data);
+            return;
+          }
+
+          if (payload.type === 'webrtc.ice_candidate') {
+            const data = (payload.data ?? {}) as Record<string, unknown>;
+            void handleIncomingCandidate(data);
             return;
           }
         } catch (error) {
@@ -1608,6 +2242,12 @@ const ChatPage: React.FC = () => {
     authenticateWebRTCSession,
     sendWebSocketMessage,
     updateWebRTCState,
+    getOrCreatePeerConnection,
+    closePeerConnection,
+    handleIncomingOffer,
+    handleIncomingAnswer,
+    handleIncomingCandidate,
+    teardownWebRTCSession,
     setAutoScrollOnNextRender,
   ]);
 
@@ -2393,6 +3033,98 @@ const ChatPage: React.FC = () => {
   }, [webrtcState]);
 
   useEffect(() => {
+    if (!webrtcState || !webrtcState.participant?.media_state) {
+      updateLocalMediaState(DEFAULT_MEDIA_STATE, { broadcast: false });
+      return;
+    }
+
+    const normalized = mergeMediaState(DEFAULT_MEDIA_STATE, webrtcState.participant.media_state);
+    updateLocalMediaState(normalized, { broadcast: false });
+  }, [updateLocalMediaState, webrtcState]);
+
+  useEffect(() => {
+    if (!webrtcState || webrtcState.status !== 'connected') {
+      return;
+    }
+
+    let cancelled = false;
+
+    const prepareLocalMedia = async () => {
+      const stream = await ensureLocalMedia({ video: localMediaState.camera === 'on' });
+      if (!stream || cancelled) {
+        return;
+      }
+
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = localMediaState.mic === 'on';
+      });
+
+      if (localMediaState.mic !== 'on') {
+        updateLocalMediaState({ mic: 'on' }, { broadcast: true });
+      }
+
+      const previewElement = localPreviewRef.current;
+      if (previewElement && previewElement.srcObject !== stream) {
+        previewElement.srcObject = stream;
+        previewElement.muted = true;
+      }
+    };
+
+    void prepareLocalMedia();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureLocalMedia, localMediaState.camera, localMediaState.mic, updateLocalMediaState, webrtcState]);
+
+  useEffect(() => {
+    remoteMediaElementsRef.current.forEach((element, userId) => {
+      if (!element) {
+        return;
+      }
+
+      const stream = remoteMediaStreams[userId];
+      if (!stream) {
+        if (element.srcObject) {
+          element.srcObject = null;
+        }
+        return;
+      }
+
+      if (element.srcObject !== stream) {
+        element.srcObject = stream;
+        element.playsInline = true;
+      }
+    });
+  }, [remoteMediaStreams]);
+
+  useEffect(() => {
+    const previewElement = localPreviewRef.current;
+    const stream = localMediaStreamRef.current;
+    if (previewElement && stream && previewElement.srcObject !== stream) {
+      previewElement.srcObject = stream;
+      previewElement.muted = true;
+    }
+  }, [localMediaState.camera, localMediaState.mic]);
+
+  useEffect(() => {
+    if (!webrtcState || webrtcState.status !== 'connected') {
+      return;
+    }
+
+    const selfId = currentUserIdRef.current;
+    if (!selfId) {
+      return;
+    }
+
+    webrtcState.participants.forEach((participant) => {
+      if (participant.user_id && participant.user_id !== selfId) {
+        void getOrCreatePeerConnection(participant.user_id);
+      }
+    });
+  }, [getOrCreatePeerConnection, webrtcState]);
+
+  useEffect(() => {
     const container = messageListRef.current;
     if (!container) {
       return;
@@ -2463,12 +3195,10 @@ const ChatPage: React.FC = () => {
         return 'Not connected';
     }
   }, [webrtcState]);
-  const isWebRTCConnected = webrtcState?.status === 'connected';
   const isCurrentAudioSession = Boolean(
     webrtcState && selectedChannel && webrtcState.channelId === selectedChannel.id
   );
   const showJoinAudioButton = !isCurrentAudioSession || webrtcState?.status === 'error';
-  const showLeaveAudioButton = isCurrentAudioSession && webrtcState?.status !== 'error';
   const joinAudioDisabled = isJoiningWebRTC || webrtcState?.status === 'authenticating';
 
   const canSendMessages = Boolean(selectedChannel && selectedChannel.type === 'text');
@@ -2730,109 +3460,205 @@ const ChatPage: React.FC = () => {
                   )}
 
                   {selectedChannel && selectedChannel.type === 'audio' && (
-                    <div className="rounded-3xl border border-emerald-500/40 bg-emerald-500/5 px-6 py-8 text-emerald-100">
-                      <header className="flex flex-col gap-2 text-left">
-                        <span className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-300/80">
-                          Audio Channel
+                    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 rounded-3xl border border-emerald-500/40 bg-slate-950/75 px-6 py-8 text-emerald-100 shadow-xl shadow-emerald-500/10">
+                      <header className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <span className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-300/80">Live conference</span>
+                          <h3 className="mt-2 text-2xl font-semibold text-white">#{selectedChannel.name}</h3>
+                          <p className="mt-1 text-sm text-emerald-200/80">See everyone in the room, share your camera, and collaborate in real time.</p>
+                        </div>
+                        <span className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.3em] text-emerald-200">
+                          {webrtcStatusLabel}
                         </span>
-                        <h3 className="text-2xl font-semibold text-white">🎧 #{selectedChannel.name}</h3>
-                        <p className="text-sm text-emerald-200/80">{EMPTY_STATES.audioChannel.body}</p>
                       </header>
 
-                      <div className="mt-6 flex flex-col gap-5 lg:flex-row">
-                        <section className="flex-1">
-                          <div className="rounded-2xl border border-emerald-400/30 bg-slate-950/40 p-5 shadow-lg shadow-emerald-500/10 backdrop-blur">
-                            <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.3em] text-emerald-300/80">
-                              <span>Status</span>
-                              <span className="font-mono text-emerald-100">{webrtcStatusLabel}</span>
-                            </div>
-                            <div className="mt-4 space-y-3">
-                              {audioParticipants.length === 0 ? (
-                                <p className="text-sm text-emerald-100/80">
-                                  Nobody is connected yet. Join to open the floor.
-                                </p>
-                              ) : (
-                                <ul className="space-y-3">
-                                  {audioParticipants.map((participant) => {
-                                    const isSelf = currentUser?.id === participant.user_id;
-                                    const micState = participant.media_state?.mic === 'on' ? 'on' : 'off';
-                                    const cameraState = participant.media_state?.camera === 'on' ? 'on' : 'off';
-
-                                    return (
-                                      <li
-                                        key={participant.user_id}
-                                        className="flex items-center justify-between rounded-xl border border-emerald-400/40 bg-slate-950/50 px-4 py-3 shadow-md shadow-emerald-500/10"
-                                      >
-                                        <div>
-                                          <p className="text-sm font-semibold text-white">
-                                            {participant.display_name || `Member #${participant.user_id}`}{' '}
-                                            {isSelf && <span className="ml-2 rounded-full bg-emerald-400/20 px-2 py-[1px] text-[10px] font-semibold uppercase tracking-wide text-emerald-200">You</span>}
-                                          </p>
-                                          <p className="text-[11px] text-emerald-200/70">
-                                            {participant.role ? participant.role : 'member'}
-                                          </p>
-                                        </div>
-                                        <div className="flex items-center gap-3 text-[11px] font-mono text-emerald-200/80">
-                                          <span className={micState === 'on' ? 'text-emerald-200' : 'text-emerald-200/60'}>
-                                            mic:{micState}
-                                          </span>
-                                          <span className={cameraState === 'on' ? 'text-emerald-200' : 'text-emerald-200/60'}>
-                                            cam:{cameraState}
-                                          </span>
-                                        </div>
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                              )}
-                            </div>
+                      <div className="min-h-[320px] rounded-2xl border border-slate-800/70 bg-slate-950/60 p-4">
+                        {audioParticipants.length === 0 ? (
+                          <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-emerald-200/70">
+                            <IconVideo className="h-12 w-12 text-emerald-300" />
+                            <p className="text-sm">You’re the first one here. When teammates join, they’ll appear in this stage.</p>
                           </div>
-                        </section>
+                        ) : (
+                          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                            {audioParticipants.map((participant) => {
+                              const isSelf = currentUser?.id === participant.user_id;
+                              const displayName =
+                                participant.display_name && participant.display_name.trim().length > 0
+                                  ? participant.display_name
+                                  : `Member #${participant.user_id}`;
+                              const initials =
+                                displayName
+                                  .split(' ')
+                                  .filter(Boolean)
+                                  .map((word) => word[0])
+                                  .join('')
+                                  .slice(0, 2)
+                                  .toUpperCase() || '??';
+                              const mediaState = mergeMediaState(DEFAULT_MEDIA_STATE, participant.media_state);
+                              const stream = isSelf ? localMediaStreamRef.current : remoteMediaStreams[participant.user_id];
+                              const hasVideoTrack = Boolean(stream?.getVideoTracks().some((track) => track.readyState === 'live'));
+                              const cameraActive = mediaState.camera === 'on' && Boolean(stream) && hasVideoTrack;
+                              const micActive = mediaState.mic === 'on';
 
-                        <section className="w-full max-w-xs space-y-4">
-                          {webrtcError && (
-                            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                              {webrtcError}
-                            </div>
+                              return (
+                                <div
+                                  key={participant.user_id}
+                                  className="group relative aspect-video overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80 shadow-lg shadow-emerald-500/10"
+                                >
+                                  <video
+                                    ref={(node) => {
+                                      if (isSelf) {
+                                        if (node) {
+                                          localPreviewRef.current = node;
+                                          const activeStream = localMediaStreamRef.current;
+                                          if (activeStream && node.srcObject !== activeStream) {
+                                            node.srcObject = activeStream;
+                                          }
+                                          node.muted = true;
+                                          node.playsInline = true;
+                                        } else {
+                                          localPreviewRef.current = null;
+                                        }
+                                      } else {
+                                        if (!node) {
+                                          remoteMediaElementsRef.current.delete(participant.user_id);
+                                          return;
+                                        }
+                                        remoteMediaElementsRef.current.set(participant.user_id, node);
+                                        const activeStream = remoteMediaStreams[participant.user_id];
+                                        if (activeStream && node.srcObject !== activeStream) {
+                                          node.srcObject = activeStream;
+                                        }
+                                        node.muted = false;
+                                        node.playsInline = true;
+                                      }
+                                    }}
+                                    autoPlay
+                                    muted={isSelf}
+                                    playsInline
+                                    className="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
+                                    style={{ opacity: cameraActive ? 1 : 0.05 }}
+                                  />
+                                  <div
+                                    className={`absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 text-center transition-opacity duration-300 ${
+                                      cameraActive ? 'opacity-0 group-hover:opacity-10' : 'opacity-100'
+                                    }`}
+                                  >
+                                    <span className="text-4xl font-semibold text-emerald-200/80">{initials}</span>
+                                    <span className="mt-2 text-sm text-emerald-200/70">{displayName}</span>
+                                    {isSelf && <span className="mt-1 text-xs uppercase tracking-[0.3em] text-emerald-300/70">You</span>}
+                                  </div>
+                                  <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/60 to-transparent p-3">
+                                    <div>
+                                      <p className="text-base font-semibold text-white">
+                                        {displayName}{' '}
+                                        {isSelf && <span className="ml-1 text-xs uppercase tracking-[0.3em] text-emerald-300/80">You</span>}
+                                      </p>
+                                      {participant.role && (
+                                        <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-200/70">{participant.role}</p>
+                                      )}
+                                    </div>
+                                    <span
+                                      className={`rounded-full px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.3em] ${
+                                        micActive ? 'bg-emerald-500/20 text-emerald-200' : 'bg-red-500/20 text-red-200'
+                                      }`}
+                                    >
+                                      {micActive ? 'Speaking' : 'Muted'}
+                                    </span>
+                                  </div>
+                                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent p-3 text-[11px] font-mono uppercase tracking-[0.3em]">
+                                    <span className={`flex items-center gap-2 ${micActive ? 'text-emerald-200' : 'text-red-300'}`}>
+                                      {micActive ? <IconMic className="h-4 w-4" /> : <IconMicOff className="h-4 w-4" />} {micActive ? 'Mic on' : 'Mic off'}
+                                    </span>
+                                    <span className={`flex items-center gap-2 ${cameraActive ? 'text-emerald-200' : 'text-slate-300'}`}>
+                                      {cameraActive ? <IconVideo className="h-4 w-4" /> : <IconVideoOff className="h-4 w-4" />} {cameraActive ? 'Cam on' : 'Cam off'}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col items-center gap-3">
+                        {webrtcError && (
+                          <div className="w-full max-w-2xl rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-sm text-red-100">
+                            {webrtcError}
+                          </div>
+                        )}
+                        {mediaPermissionError && (
+                          <div className="w-full max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-center text-sm text-amber-100">
+                            {mediaPermissionError}
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-center gap-4">
+                          {showJoinAudioButton ? (
+                            <button
+                              type="button"
+                              onClick={handleJoinAudioChannel}
+                              disabled={joinAudioDisabled}
+                              className="flex h-14 items-center gap-3 rounded-full bg-emerald-400 px-8 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/40 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-400/60"
+                            >
+                              <IconVideo className="h-5 w-5" />
+                              {joinAudioDisabled ? 'Joining…' : 'Join conference'}
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleToggleMic();
+                                }}
+                                disabled={isJoiningWebRTC}
+                                className={`flex h-14 w-14 items-center justify-center rounded-full border-2 transition ${
+                                  localMediaState.mic === 'on'
+                                    ? 'border-emerald-400 bg-emerald-400/20 text-emerald-100'
+                                    : 'border-slate-800 bg-slate-900 text-red-200'
+                                } disabled:cursor-not-allowed disabled:opacity-60`}
+                                aria-label={localMediaState.mic === 'on' ? 'Mute microphone' : 'Unmute microphone'}
+                              >
+                                {localMediaState.mic === 'on' ? <IconMic className="h-5 w-5" /> : <IconMicOff className="h-5 w-5" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleToggleCamera();
+                                }}
+                                disabled={isJoiningWebRTC}
+                                className={`flex h-14 w-14 items-center justify-center rounded-full border-2 transition ${
+                                  localMediaState.camera === 'on'
+                                    ? 'border-emerald-400 bg-emerald-400/20 text-emerald-100'
+                                    : 'border-slate-800 bg-slate-900 text-slate-300'
+                                } disabled:cursor-not-allowed disabled:opacity-60`}
+                                aria-label={localMediaState.camera === 'on' ? 'Disable camera' : 'Enable camera'}
+                              >
+                                {localMediaState.camera === 'on' ? <IconVideo className="h-5 w-5" /> : <IconVideoOff className="h-5 w-5" />}
+                              </button>
+                              <button
+                                type="button"
+                                disabled
+                                className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-slate-800 bg-slate-900 text-slate-500 opacity-60"
+                                aria-label="Share screen (coming soon)"
+                                title="Screen sharing coming soon"
+                              >
+                                <IconScreenShare className="h-5 w-5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleLeaveAudioChannel();
+                                }}
+                                disabled={isJoiningWebRTC}
+                                className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 transition hover:bg-red-400 disabled:cursor-not-allowed disabled:bg-red-500/60"
+                                aria-label="Leave conference"
+                              >
+                                <IconPhone className="h-5 w-5" />
+                              </button>
+                            </>
                           )}
-
-                          <div className="rounded-2xl border border-emerald-400/30 bg-slate-950/40 p-5 shadow-lg shadow-emerald-500/10 backdrop-blur">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300/80">
-                              Actions
-                            </p>
-                            <div className="mt-4 space-y-3">
-                              {showJoinAudioButton && (
-                                <button
-                                  type="button"
-                                  onClick={handleJoinAudioChannel}
-                                  disabled={joinAudioDisabled}
-                                  className="w-full rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-md shadow-emerald-500/40 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-400/60"
-                                >
-                                  {joinAudioDisabled ? 'Joining…' : 'Join audio channel'}
-                                </button>
-                              )}
-
-                              {showLeaveAudioButton && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    void handleLeaveAudioChannel();
-                                  }}
-                                  disabled={isJoiningWebRTC}
-                                  className="w-full rounded-xl border border-emerald-400/60 bg-transparent px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:border-emerald-300 hover:text-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-400/40 disabled:text-emerald-200/60"
-                                >
-                                  Leave channel
-                                </button>
-                              )}
-
-                              {!isWebRTCConnected && !showJoinAudioButton && !showLeaveAudioButton && (
-                                <p className="text-[11px] text-emerald-200/70">
-                                  Waiting for realtime connection…
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </section>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -2939,8 +3765,9 @@ const ChatPage: React.FC = () => {
               </div>
             )}
           </section>
-          <footer className="border-t border-slate-800/70 bg-slate-950/80 px-4 py-4">
-            <form onSubmit={handleSendMessage} className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+          {selectedChannel && selectedChannel.type === 'text' && (
+            <footer className="border-t border-slate-800/70 bg-slate-950/80 px-4 py-4">
+              <form onSubmit={handleSendMessage} className="mx-auto flex w-full max-w-3xl flex-col gap-3">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -3032,8 +3859,9 @@ const ChatPage: React.FC = () => {
                   Messaging is only available in text channels. Choose another channel to chat.
                 </p>
               )}
-            </form>
-          </footer>
+              </form>
+            </footer>
+          )}
         </main>
       </div>
 
