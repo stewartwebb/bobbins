@@ -91,6 +91,10 @@ func connect() (*gorm.DB, error) {
 		return nil, err
 	}
 
+	if err := setSearchPath(db, schema); err != nil {
+		return nil, err
+	}
+
 	return db, nil
 }
 
@@ -184,7 +188,10 @@ func appendSearchPath(dsn, schema string) string {
 		return dsn
 	}
 
-	value := formatSchemaForSearchPath(schema)
+	value := buildSearchPathValue(schema, ",")
+	if value == "" {
+		return dsn
+	}
 
 	if strings.Contains(dsn, "://") {
 		parsed, err := url.Parse(dsn)
@@ -207,28 +214,79 @@ func appendSearchPath(dsn, schema string) string {
 }
 
 func ensureSchemaExists(db *gorm.DB, schema string) error {
-	return nil
-	
-	/*
 	if schema == "" {
 		return nil
 	}
 
-	stmt := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(schema))
-	return db.Exec(stmt).Error
-	*/
+	parts := schemaList(schema)
+	for _, part := range parts {
+		if strings.EqualFold(part, "public") {
+			continue
+		}
+
+		stmt := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(part))
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
-func formatSchemaForSearchPath(schema string) string {
+func setSearchPath(db *gorm.DB, schema string) error {
 	if schema == "" {
-		return schema
+		return nil
 	}
 
-	if requiresQuoting(schema) {
-		return quoteIdentifier(schema)
+	value := buildSearchPathValue(schema, ", ")
+	if value == "" {
+		return nil
 	}
 
-	return schema
+	stmt := fmt.Sprintf("SET search_path TO %s", value)
+	return db.Exec(stmt).Error
+}
+
+func schemaList(schema string) []string {
+	parts := strings.Split(schema, ",")
+	var result []string
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func buildSearchPathValue(schema, separator string) string {
+	parts := schemaList(schema)
+	if len(parts) == 0 {
+		return ""
+	}
+
+	includePublic := true
+	for _, part := range parts {
+		if strings.EqualFold(part, "public") {
+			includePublic = false
+			break
+		}
+	}
+
+	if includePublic {
+		parts = append(parts, "public")
+	}
+
+	formatted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if requiresQuoting(part) {
+			formatted = append(formatted, quoteIdentifier(part))
+		} else {
+			formatted = append(formatted, part)
+		}
+	}
+
+	return strings.Join(formatted, separator)
 }
 
 func requiresQuoting(identifier string) bool {
