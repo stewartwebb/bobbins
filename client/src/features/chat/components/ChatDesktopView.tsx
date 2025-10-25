@@ -5,6 +5,7 @@ import ChannelSidebar from './chat-desktop/ChannelSidebar';
 import ChatMainArea from './chat-desktop/ChatMainArea';
 import CreateChannelDialog from './chat-desktop/CreateChannelDialog';
 import ServerSidebar from './chat-desktop/ServerSidebar';
+import AudioSessionBridge from './chat-desktop/AudioSessionBridge';
 
 type ChatDesktopViewProps = {
   controller: ChatController;
@@ -96,9 +97,10 @@ const ChatDesktopView: React.FC<ChatDesktopViewProps> = ({ controller }) => {
       <div className="relative z-10 flex min-h-dvh flex-1 flex-col overflow-hidden md:min-h-screen md:flex-row">
         <ServerSidebar controller={controller} />
         <ChannelSidebar controller={controller} />
-  <div className="min-h-0 min-w-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1">
           <ChatMainArea controller={controller} onOpenNavigation={() => setIsMobileNavOpen(true)} />
         </div>
+        <AudioSessionBridge controller={controller} />
       </div>
 
       {isMobileNavOpen && (

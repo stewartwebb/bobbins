@@ -248,6 +248,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const settingRemoteAnswerRef = useRef<Map<number, boolean>>(new Map());
   const localPreviewRef = useRef<HTMLVideoElement | null>(null);
   const localMediaStateRef = useRef<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
+  const remoteAudioElementsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
 
   const normalizeChannelList = useCallback(
     (list: Channel[]) =>
@@ -513,6 +514,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       element.srcObject = null;
     });
     remoteMediaElementsRef.current.clear();
+
+    remoteAudioElementsRef.current.forEach((element) => {
+      try {
+        element.srcObject = null;
+      } catch (audioDetachError) {
+        console.debug('Remote audio teardown error', audioDetachError);
+      }
+    });
+    remoteAudioElementsRef.current.clear();
 
     setRemoteMediaStreams({});
 
@@ -2661,6 +2671,48 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   }, [remoteMediaStreams]);
 
   useEffect(() => {
+    remoteAudioElementsRef.current.forEach((element, userId) => {
+      if (!element) {
+        return;
+      }
+
+      const stream = remoteMediaStreams[userId];
+      if (!stream) {
+        if (element.srcObject) {
+          element.srcObject = null;
+        }
+        return;
+      }
+
+      if (element.srcObject !== stream) {
+        element.srcObject = stream;
+      }
+
+  element.autoplay = true;
+      element.muted = false;
+      element.volume = 1;
+
+      const playResult = element.play();
+      if (playResult && typeof playResult.catch === 'function') {
+        void playResult.catch(() => undefined);
+      }
+    });
+  }, [remoteMediaStreams]);
+
+  useEffect(() => {
+    if (webrtcState) {
+      return;
+    }
+
+    remoteAudioElementsRef.current.forEach((element) => {
+      if (element.srcObject) {
+        element.srcObject = null;
+      }
+    });
+    remoteAudioElementsRef.current.clear();
+  }, [webrtcState]);
+
+  useEffect(() => {
     const previewElement = localPreviewRef.current;
     const stream = localMediaStreamRef.current;
     if (previewElement && stream && previewElement.srcObject !== stream) {
@@ -2914,6 +2966,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         localPreviewRef,
         localMediaStreamRef,
         remoteMediaElementsRef,
+        remoteAudioElementsRef,
       },
       actions: {
         handleServerSelect,
