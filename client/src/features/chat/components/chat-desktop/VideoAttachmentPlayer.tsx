@@ -197,6 +197,8 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
           src={attachment.url}
           className="block h-auto max-h-[70vh] w-full bg-black object-contain"
           preload="metadata"
+                  disablePictureInPicture
+       
           poster={attachment.preview_url}
           onLoadedMetadata={handleLoadedMetadata}
           onTimeUpdate={handleTimeUpdate}
