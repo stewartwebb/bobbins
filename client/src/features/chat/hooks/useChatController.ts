@@ -3266,6 +3266,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           }
         }
 
+        }
+
       setMessageInput("");
     } catch (err) {
       setError("Failed to send message. Please try again.");
