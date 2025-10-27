@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { type ComponentPropsWithoutRef } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -8,12 +8,16 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { coldarkDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import type { CodeComponent } from 'react-markdown/lib/ast-to-react';
 import 'katex/dist/katex.min.css';
 
 const baseTextClass = 'text-sm leading-relaxed text-slate-200';
 
-const CodeBlock: CodeComponent = ({ inline, className, children, ...props }) => {
+type CodeProps = ComponentPropsWithoutRef<'code'> & {
+  inline?: boolean;
+  node?: unknown;
+};
+
+const CodeBlock = ({ inline, className, children, ...props }: CodeProps) => {
   const content = String(children).replace(/\n$/, '');
 
   if (inline) {
