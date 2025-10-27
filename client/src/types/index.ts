@@ -67,7 +67,7 @@ export interface MessageAttachment {
 }
 
 export interface LoginRequest {
-  email: string;
+  identifier: string;
   password: string;
 }
 

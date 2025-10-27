@@ -104,17 +104,31 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	emailAddr := strings.ToLower(strings.TrimSpace(req.Email))
+	identifier := strings.TrimSpace(req.Identifier)
 	password := strings.TrimSpace(req.Password)
 
 	var user models.User
-	if err := db.WithContext(c).Where("email = ?", emailAddr).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+	// Check if identifier looks like an email (contains @ and has text before and after it)
+	if isEmailFormat(identifier) {
+		emailAddr := strings.ToLower(identifier)
+		if err := db.WithContext(c).Where("email = ?", emailAddr).First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query user"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query user"})
-		return
+	} else {
+		// Use case-insensitive comparison for username
+		if err := db.WithContext(c).Where("LOWER(username) = LOWER(?)", identifier).First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query user"})
+			return
+		}
 	}
 
 	if err := auth.ComparePassword(user.Password, password); err != nil {
@@ -240,6 +254,23 @@ func UpdateCurrentUser(c *gin.Context) {
 }
 
 var errUserConflict = errors.New("username or email already in use")
+
+func isEmailFormat(identifier string) bool {
+	// Basic email validation: contains @ with non-empty parts before and after
+	atIndex := strings.Index(identifier, "@")
+	if atIndex <= 0 || atIndex >= len(identifier)-1 {
+		return false
+	}
+	// Ensure there's only one @ symbol
+	if strings.Count(identifier, "@") != 1 {
+		return false
+	}
+	// Check domain part has a dot and doesn't start or end with a dot
+	afterAt := identifier[atIndex+1:]
+	dotIndex := strings.Index(afterAt, ".")
+	// Dot must exist (>= 0), not at start (> 0), and not at end (< len-1)
+	return dotIndex > 0 && dotIndex < len(afterAt)-1
+}
 
 func ensureUniqueUser(db *gorm.DB, username, email string) error {
 	var count int64
