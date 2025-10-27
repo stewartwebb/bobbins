@@ -72,6 +72,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
       handleDragOver,
       handleDragLeave,
       handleDrop,
+      handlePaste,
       handleJumpToBottom,
       handleSendMessage,
       handleMessageChange,
@@ -464,7 +465,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
                           )}
                         </div>
                         <div className="flex flex-1 flex-col">
-                          <div className="flex flex-wrap items-baseline gap-2">
+                          <div className="flex items-baseline justify-between gap-2">
                             <span className="font-semibold text-slate-100">{group.username}</span>
                             <span className="font-mono text-[11px] text-slate-500">{headerTimestamp}</span>
                           </div>
@@ -493,18 +494,18 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
                               })();
 
                               return (
-                                <div key={message.id} className="flex flex-col gap-2">
-                                  {showTimestamp && (
-                                    <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-slate-500">
-                                      {formatTimestamp(message.created_at)}
-                                    </span>
-                                  )}
-                                  {hasContent && <MarkdownMessage content={message.content} />}
-                                  {attachmentList.length > 0 && (
-                                    <div className="flex flex-col gap-2">
-                                      {attachmentList.map((attachment) => renderAttachment(attachment))}
-                                    </div>
-                                  )}
+                                <div key={message.id} className="flex items-start justify-between gap-3">
+                                  <div className="flex-1 space-y-2">
+                                    {hasContent && <MarkdownMessage content={message.content} />}
+                                    {attachmentList.length > 0 && (
+                                      <div className="flex flex-col gap-2">
+                                        {attachmentList.map((attachment) => renderAttachment(attachment))}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <span className={`flex-shrink-0 pt-1 font-mono text-[10px] text-slate-500 transition-opacity ${showTimestamp ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                    {formatTimestamp(message.created_at)}
+                                  </span>
                                 </div>
                               );
                             })}
@@ -596,6 +597,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
                   onChange={handleMessageChange}
                   onKeyDown={handleMessageKeyDown}
                   onBlur={handleMessageBlur}
+                  onPaste={handlePaste}
                   ref={messageInputRef}
                   placeholder={messagePlaceholder}
                   disabled={!canSendMessages || !selectedChannel || wsStatus !== 'connected'}

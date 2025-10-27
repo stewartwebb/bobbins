@@ -215,7 +215,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
         <video
           ref={videoRef}
           src={attachment.url}
-          className="block h-auto max-h-[70vh] w-full bg-black object-contain"
+          className="block h-auto max-h-[70vh] w-full bg-black object-contain cursor-pointer"
           preload="metadata"
                   disablePictureInPicture
        
@@ -226,9 +226,24 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
           onPause={() => setIsPlaying(false)}
           onEnded={handleEnded}
           onVolumeChange={handleVolumeChange}
+          onClick={handleTogglePlay}
         />
-        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/70 to-transparent p-4">
-          <div className="flex items-center justify-between gap-3">
+        {!isPlaying && (
+          <div 
+            className="absolute inset-0 flex items-center justify-center bg-black/30 cursor-pointer transition-opacity hover:bg-black/40"
+          >
+            <button
+              type="button"
+              onClick={handleTogglePlay}
+              className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-500/95 text-slate-950 shadow-2xl shadow-primary-500/50 transition hover:bg-primary-400 hover:scale-110"
+              aria-label="Play video"
+            >
+              <IconPlay className="h-10 w-10 ml-1" />
+            </button>
+          </div>
+        )}
+        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/70 to-transparent p-4 pointer-events-none">
+          <div className="flex items-center justify-between gap-3 pointer-events-auto">
             <button
               type="button"
               onClick={handleTogglePlay}

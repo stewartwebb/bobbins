@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeEvent,
+  ClipboardEvent as ReactClipboardEvent,
   DragEvent as ReactDragEvent,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
@@ -1005,6 +1006,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         connection.ontrack = null;
         connection.onnegotiationneeded = null;
         connection.onconnectionstatechange = null;
+        connection.oniceconnectionstatechange = null;
         connection.getSenders().forEach((sender) => {
           try {
             connection.removeTrack(sender);
@@ -1167,6 +1169,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               updateLocalMediaState({ camera: "off" }, { broadcast: true });
             };
           });
+
+          // Update local media state to reflect actual track states
+          updateLocalMediaState({ mic: 'on', camera: wantsVideo ? 'on' : 'off' }, { broadcast: true });
         } else if (wantsVideo && stream.getVideoTracks().length === 0) {
           const additionalStream = await navigator.mediaDevices.getUserMedia({
             video: {
@@ -1197,6 +1202,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                 connection.addTrack(videoTrack, stream as MediaStream);
               }
             });
+
+            // Update local media state to reflect camera is now on
+            updateLocalMediaState({ camera: 'on' }, { broadcast: true });
           }
         }
 
@@ -1225,9 +1233,63 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     [updateLocalMediaState],
   );
 
-  const closePeerConnection = useCallback((userId: number) => {
-    const connection = peerConnectionsRef.current.get(userId);
-    if (!connection) {
+  const closePeerConnection = useCallback(
+    (userId: number) => {
+      const connection = peerConnectionsRef.current.get(userId);
+      if (!connection) {
+        return;
+      }
+
+      peerConnectionsRef.current.delete(userId);
+      pendingCandidatesRef.current.delete(userId);
+      makingOfferRef.current.delete(userId);
+      ignoreOfferRef.current.delete(userId);
+      settingRemoteAnswerRef.current.delete(userId);
+
+      try {
+        connection.onicecandidate = null;
+        connection.ontrack = null;
+        connection.onnegotiationneeded = null;
+        connection.onconnectionstatechange = null;
+        connection.oniceconnectionstatechange = null;
+        connection.getSenders().forEach((sender) => {
+          try {
+            connection.removeTrack(sender);
+          } catch (removeError) {
+            console.debug('removeTrack failed during close', removeError);
+          }
+        });
+        connection.close();
+      } catch (connectionError) {
+        console.debug('Error closing peer connection', connectionError);
+      }
+
+      const remoteStream = remoteStreamsRef.current.get(userId);
+      if (remoteStream) {
+        remoteStream.getTracks().forEach((track) => track.stop());
+        remoteStreamsRef.current.delete(userId);
+      }
+
+      setRemoteMediaStreams((previous) => {
+        if (!(userId in previous)) {
+          return previous;
+        }
+        const { [userId]: _, ...rest } = previous;
+        return rest;
+      });
+
+      const mediaElement = remoteMediaElementsRef.current.get(userId);
+      if (mediaElement) {
+        mediaElement.srcObject = null;
+        remoteMediaElementsRef.current.delete(userId);
+      }
+    },
+    []
+  );
+
+  const drainPendingIceCandidates = useCallback(async (userId: number, connection: RTCPeerConnection) => {
+    const pending = pendingCandidatesRef.current.get(userId);
+    if (!pending || pending.length === 0) {
       return;
     }
 
@@ -1349,7 +1411,30 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
       connection.onconnectionstatechange = () => {
         const state = connection.connectionState;
-        if (state === "failed" || state === "closed") {
+        console.log(`Connection state changed for user ${targetUserId}:`, state);
+        if (state === 'failed' || state === 'closed') {
+          closePeerConnection(targetUserId);
+        }
+      };
+
+      connection.oniceconnectionstatechange = () => {
+        const iceState = connection.iceConnectionState;
+        console.log(`ICE connection state changed for user ${targetUserId}:`, iceState);
+        
+        if (iceState === 'failed') {
+          console.log(`ICE connection failed for user ${targetUserId}, attempting to restart ICE`);
+          // Restart ICE to attempt recovery
+          connection.restartIce();
+        } else if (iceState === 'disconnected') {
+          console.log(`ICE connection disconnected for user ${targetUserId}, monitoring for recovery`);
+          // Give it some time to reconnect before taking action
+          setTimeout(() => {
+            if (connection.iceConnectionState === 'disconnected') {
+              console.log(`ICE still disconnected after timeout for user ${targetUserId}, restarting ICE`);
+              connection.restartIce();
+            }
+          }, 5000);
+        } else if (iceState === 'closed') {
           closePeerConnection(targetUserId);
         }
       };
@@ -2747,7 +2832,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
   useEffect(() => {
     const handleOffline = () => {
-      setWsStatus("error");
+      console.log('Network went offline, closing WebSocket and monitoring WebRTC connections');
+      setWsStatus('error');
 
       try {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -2757,13 +2843,31 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         console.info("Websocket close on offline failed", offlineError);
       }
 
+      // Mark all peer connections for monitoring
+      peerConnectionsRef.current.forEach((connection, userId) => {
+        console.log(`Monitoring peer connection ${userId} during offline event`);
+        // Don't close connections immediately - let ICE connection state handler manage them
+      });
+
       scheduleReconnect();
     };
 
     const handleOnline = () => {
+      console.log('Network came back online, reconnecting WebSocket');
       clearRetryTimeout();
       setWsStatus("connecting");
       setWsRetryCount((count) => count + 1);
+
+      // Re-authenticate WebRTC session if we have one
+      const activeSession = webrtcSessionRef.current;
+      if (activeSession && activeSession.status === 'connected') {
+        console.log('Re-authenticating WebRTC session after network recovery');
+        // The new WebSocket connection will re-authenticate when it opens
+        pendingWebRTCAuthRef.current = {
+          sessionToken: activeSession.sessionToken,
+          channelId: activeSession.channelId,
+        };
+      }
     };
 
     window.addEventListener("offline", handleOffline);
@@ -3084,6 +3188,41 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       processFiles(event.dataTransfer?.files ?? null);
     },
     [processFiles],
+  );
+
+  const handlePaste = useCallback(
+    (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+      if (!selectedChannel || selectedChannel.type !== 'text') {
+        return;
+      }
+
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) {
+        return;
+      }
+
+      // Check if clipboard contains files
+      const items = clipboardData.items;
+      const files: File[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) {
+            files.push(file);
+          }
+        }
+      }
+
+      // If files were found, process them and prevent default paste behavior
+      if (files.length > 0) {
+        event.preventDefault();
+        processFiles(files);
+      }
+      // If no files, allow normal paste behavior (text)
+    },
+    [selectedChannel, processFiles]
   );
 
   const sendMessage = useCallback(async () => {
@@ -3913,118 +4052,120 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     return "animate-pulse";
   }, [wsStatus]);
 
-  return {
-    state: {
-      servers,
-      selectedServer,
-      channels,
-      selectedChannel,
-      messages,
-      hasMoreMessages,
-      messagesCursor,
-      isLoadingOlderMessages,
-      unreadMessageCount,
-      messageInput,
-      isServerActionOpen,
-      isLoadingServers,
-      isLoadingChannels,
-      isLoadingMessages,
-      isSendingMessage,
-      error,
-      wsStatus,
-      wsRetryCount,
-      uploadQueue,
-      isDragActive,
-      previewAttachment,
-      composerMaxHeight,
-      currentUser,
-      typingByChannel,
-      isCreateChannelOpen,
-      isCreatingChannel,
-      createChannelError,
-      createChannelForm,
-      webrtcState,
-      isJoiningWebRTC,
-      webrtcError,
-      localMediaState,
-      remoteMediaStreams,
-      mediaPermissionError,
-      channelParticipants,
-    },
-    derived: {
-      canManageChannels,
-      typingIndicatorMessage,
-      filteredMessages,
-      groupedMessages,
-      audioParticipants,
-      activeAudioChannel,
-      previewAttachmentIsVideo,
-      previewAttachmentIsImage,
-      showJoinAudioButton,
-      joinAudioDisabled,
-      audioControlsDisabled,
-      audioSessionName,
-      audioSessionPrefix,
-      audioParticipantCount,
-      audioParticipantLabel,
-      isAudioSessionConnected,
-      audioIndicatorClasses,
-      audioStatusBadgeClass,
-      audioSessionInfoText,
-      canSendMessages,
-      messagePlaceholder,
-      showConnectionOverlay,
-      overlayCopy,
-      spinnerStateClass,
-      webrtcStatusLabel,
-    },
-    refs: {
-      messageInputRef,
-      messageListRef,
-      messageListContentRef,
-      fileInputRef,
-      localPreviewRef,
-      localMediaStreamRef,
-      remoteMediaElementsRef,
-      remoteAudioElementsRef,
-    },
-    actions: {
-      handleServerSelect,
-      handleChannelSelect,
-      handleMessageChange,
-      handleMessageBlur,
-      handleMessageKeyDown,
-      handleSendMessage,
-      handleOpenFilePicker,
-      handleFileInputChange,
-      handleDragOver,
-      handleDragEnter,
-      handleDragLeave,
-      handleDrop,
-      handleManualReconnect,
-      handleJumpToBottom,
-      handleToggleMic,
-      handleToggleCamera,
-      handleJoinAudioChannel,
-      handleLeaveAudioChannel,
-      handleCreateServer,
-      handleJoinServer,
-      handleClosePreview,
-      handlePreviewAttachment,
-      handleOpenCreateChannel,
-      handleCloseCreateChannel,
-      handleCreateChannelNameChange,
-      handleCreateChannelDescriptionChange,
-      handleCreateChannelTypeChange,
-      handleCreateChannelSubmit,
-      openServerActionDialog,
-      closeServerActionDialog,
-    },
-    utils: {
-      formatTimestamp,
-      formatFileSize,
-      mergeMediaState,
-      DEFAULT_MEDIA_STATE,
-    },
+    return {
+      state: {
+        servers,
+        selectedServer,
+        channels,
+        selectedChannel,
+        messages,
+        hasMoreMessages,
+        messagesCursor,
+        isLoadingOlderMessages,
+        unreadMessageCount,
+        messageInput,
+        isServerActionOpen,
+        isLoadingServers,
+        isLoadingChannels,
+        isLoadingMessages,
+        isSendingMessage,
+        error,
+        wsStatus,
+        wsRetryCount,
+        uploadQueue,
+        isDragActive,
+        previewAttachment,
+        composerMaxHeight,
+        currentUser,
+        typingByChannel,
+        isCreateChannelOpen,
+        isCreatingChannel,
+        createChannelError,
+        createChannelForm,
+        webrtcState,
+        isJoiningWebRTC,
+        webrtcError,
+        localMediaState,
+        remoteMediaStreams,
+        mediaPermissionError,
+        channelParticipants,
+      },
+      derived: {
+        canManageChannels,
+        typingIndicatorMessage,
+        filteredMessages,
+        groupedMessages,
+        audioParticipants,
+        activeAudioChannel,
+        previewAttachmentIsVideo,
+        previewAttachmentIsImage,
+        showJoinAudioButton,
+        joinAudioDisabled,
+        audioControlsDisabled,
+        audioSessionName,
+        audioSessionPrefix,
+        audioParticipantCount,
+        audioParticipantLabel,
+        isAudioSessionConnected,
+        audioIndicatorClasses,
+        audioStatusBadgeClass,
+        audioSessionInfoText,
+        canSendMessages,
+        messagePlaceholder,
+        showConnectionOverlay,
+        overlayCopy,
+        spinnerStateClass,
+        webrtcStatusLabel,
+      },
+      refs: {
+        messageInputRef,
+        messageListRef,
+        messageListContentRef,
+        fileInputRef,
+        localPreviewRef,
+        localMediaStreamRef,
+        remoteMediaElementsRef,
+        remoteAudioElementsRef,
+      },
+      actions: {
+        handleServerSelect,
+        handleChannelSelect,
+        handleMessageChange,
+        handleMessageBlur,
+        handleMessageKeyDown,
+        handleSendMessage,
+        handleOpenFilePicker,
+        handleFileInputChange,
+        handleDragOver,
+        handleDragEnter,
+        handleDragLeave,
+        handleDrop,
+        handlePaste,
+        handleManualReconnect,
+        handleJumpToBottom,
+        handleToggleMic,
+        handleToggleCamera,
+        handleJoinAudioChannel,
+        handleLeaveAudioChannel,
+        handleCreateServer,
+        handleJoinServer,
+        handleClosePreview,
+        handlePreviewAttachment,
+        handleOpenCreateChannel,
+        handleCloseCreateChannel,
+        handleCreateChannelNameChange,
+        handleCreateChannelDescriptionChange,
+        handleCreateChannelTypeChange,
+        handleCreateChannelSubmit,
+        openServerActionDialog,
+        closeServerActionDialog,
+      },
+      utils: {
+        formatTimestamp,
+        formatFileSize,
+        mergeMediaState,
+        DEFAULT_MEDIA_STATE,
+      },
+    };
   };
 };
