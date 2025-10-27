@@ -295,6 +295,120 @@ func (s *Service) GetObject(ctx context.Context, objectKey string) (io.ReadClose
 	return output.Body, contentLength, contentType, nil
 }
 
+// PresignAvatarUpload generates a pre-signed PUT URL for avatar uploads with a specific prefix.
+func (s *Service) PresignAvatarUpload(ctx context.Context, fileName, contentType string, fileSize int64, avatarType string) (*UploadSignature, error) {
+	if s == nil {
+		return nil, ErrServiceDisabled
+	}
+
+	contentType = strings.TrimSpace(contentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	if fileSize <= 0 {
+		return nil, fmt.Errorf("file_size must be greater than zero")
+	}
+
+	if s.maxUploadSize > 0 && fileSize > s.maxUploadSize {
+		return nil, fmt.Errorf("file exceeds max upload size of %d bytes", s.maxUploadSize)
+	}
+
+	safeName := sanitizeFileName(fileName)
+	if safeName == "" {
+		safeName = "avatar"
+	}
+
+	ext := filepath.Ext(safeName)
+	prefix := fmt.Sprintf("avatars/%s", avatarType)
+	key := path.Join(prefix, time.Now().UTC().Format("2006/01/02"), uuid.NewString()+strings.ToLower(ext))
+
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
+		ACL:         types.ObjectCannedACLPublicRead,
+	}
+
+	presignCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	result, err := s.presignClient.PresignPutObject(presignCtx, input, s3.WithPresignExpires(defaultPresignTTL))
+	if err != nil {
+		return nil, fmt.Errorf("presign put object: %w", err)
+	}
+
+	headers := map[string]string{}
+	for keyHeader, values := range result.SignedHeader {
+		if len(values) == 0 {
+			continue
+		}
+		headers[keyHeader] = values[0]
+	}
+
+	if contentType != "" {
+		headers["Content-Type"] = contentType
+	}
+
+	fileURL := s.assetURL(key)
+
+	return &UploadSignature{
+		UploadURL: result.URL,
+		Method:    httpMethodFromRequest(result.Method),
+		Headers:   headers,
+		ObjectKey: key,
+		FileURL:   fileURL,
+		ExpiresAt: time.Now().Add(defaultPresignTTL),
+	}, nil
+}
+
+// UploadAvatarObject uploads an avatar to object storage with a specific prefix.
+func (s *Service) UploadAvatarObject(ctx context.Context, fileName, contentType string, fileSize int64, body io.Reader, avatarType string) (*UploadResult, error) {
+	if s == nil {
+		return nil, ErrServiceDisabled
+	}
+
+	if fileSize <= 0 {
+		return nil, fmt.Errorf("file_size must be greater than zero")
+	}
+
+	if s.maxUploadSize > 0 && fileSize > s.maxUploadSize {
+		return nil, fmt.Errorf("file exceeds max upload size of %d bytes", s.maxUploadSize)
+	}
+
+	contentType = strings.TrimSpace(contentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	safeName := sanitizeFileName(fileName)
+	if safeName == "" {
+		safeName = "avatar"
+	}
+
+	ext := filepath.Ext(safeName)
+	prefix := fmt.Sprintf("avatars/%s", avatarType)
+	key := path.Join(prefix, time.Now().UTC().Format("2006/01/02"), uuid.NewString()+strings.ToLower(ext))
+
+	input := &s3.PutObjectInput{
+		Bucket:        aws.String(s.bucket),
+		Key:           aws.String(key),
+		Body:          body,
+		ContentType:   aws.String(contentType),
+		ContentLength: aws.Int64(fileSize),
+		ACL:           types.ObjectCannedACLPublicRead,
+	}
+
+	if _, err := s.client.PutObject(ctx, input); err != nil {
+		return nil, fmt.Errorf("put object: %w", err)
+	}
+
+	return &UploadResult{
+		ObjectKey: key,
+		FileURL:   s.assetURL(key),
+	}, nil
+}
+
 func (s *Service) assetURL(key string) string {
 	if s.originBase == "" {
 		return key

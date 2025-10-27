@@ -20,6 +20,8 @@ type User struct {
 	Email                   string     `json:"email" gorm:"unique;not null"`
 	Password                string     `json:"-" gorm:"not null"`
 	Avatar                  string     `json:"avatar"`
+	AvatarOriginalKey       string     `json:"-" gorm:"size:512"`
+	AvatarCropData          string     `json:"-" gorm:"type:text"`
 	EmailVerifiedAt         *time.Time `json:"email_verified_at"`
 	EmailVerificationToken  string     `json:"-" gorm:"size:191"`
 	EmailVerificationSentAt *time.Time `json:"-"`
@@ -39,19 +41,21 @@ type ServerMember struct {
 
 // Server represents a Discord-like server/guild.
 type Server struct {
-	ID              uint           `json:"id" gorm:"primaryKey"`
-	Name            string         `json:"name" gorm:"not null"`
-	Description     string         `json:"description"`
-	Icon            string         `json:"icon"`
-	OwnerID         uint           `json:"owner_id" gorm:"not null"`
-	Owner           User           `json:"owner" gorm:"foreignKey:OwnerID"`
-	Channels        []Channel      `json:"channels" gorm:"foreignKey:ServerID"`
-	Members         []User         `json:"members" gorm:"many2many:server_members;"`
-	MemberRelations []ServerMember `json:"-" gorm:"foreignKey:ServerID"`
-	Invites         []ServerInvite `json:"-" gorm:"foreignKey:ServerID"`
-	CurrentMemberRole string       `json:"current_member_role,omitempty" gorm:"-"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID                uint           `json:"id" gorm:"primaryKey"`
+	Name              string         `json:"name" gorm:"not null"`
+	Description       string         `json:"description"`
+	Icon              string         `json:"icon"`
+	IconOriginalKey   string         `json:"-" gorm:"size:512"`
+	IconCropData      string         `json:"-" gorm:"type:text"`
+	OwnerID           uint           `json:"owner_id" gorm:"not null"`
+	Owner             User           `json:"owner" gorm:"foreignKey:OwnerID"`
+	Channels          []Channel      `json:"channels" gorm:"foreignKey:ServerID"`
+	Members           []User         `json:"members" gorm:"many2many:server_members;"`
+	MemberRelations   []ServerMember `json:"-" gorm:"foreignKey:ServerID"`
+	Invites           []ServerInvite `json:"-" gorm:"foreignKey:ServerID"`
+	CurrentMemberRole string         `json:"current_member_role,omitempty" gorm:"-"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 // Channel represents a channel within a server.
@@ -168,4 +172,20 @@ type CreateServerInviteRequest struct {
 	MaxUses        int      `json:"max_uses"`
 	Emails         []string `json:"emails"`
 	Message        string   `json:"message"`
+}
+
+// AvatarCropData stores the crop/position information for an avatar image.
+type AvatarCropData struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+	Scale  float64 `json:"scale"`
+}
+
+// SetAvatarRequest captures the payload for setting user or server avatars.
+type SetAvatarRequest struct {
+	ObjectKey string          `json:"object_key" binding:"required"`
+	URL       string          `json:"url" binding:"required"`
+	CropData  *AvatarCropData `json:"crop_data"`
 }
