@@ -207,6 +207,9 @@ GIN_MODE=debug
 # JWT_SECRET=your-secret-key
 # JWT_EXPIRES_IN=24h
 
+# Application base URL (used in email verification links)
+APP_BASE_URL=http://localhost:3000
+
 # Postmark (to be configured)
 # POSTMARK_SERVER_TOKEN=your-postmark-server-token
 # POSTMARK_FROM_EMAIL=no-reply@yourdomain.com
