@@ -104,17 +104,30 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	emailAddr := strings.ToLower(strings.TrimSpace(req.Email))
+	identifier := strings.TrimSpace(req.Identifier)
 	password := strings.TrimSpace(req.Password)
 
 	var user models.User
-	if err := db.WithContext(c).Where("email = ?", emailAddr).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+	// Check if identifier contains @ to determine if it's an email or username
+	if strings.Contains(identifier, "@") {
+		emailAddr := strings.ToLower(identifier)
+		if err := db.WithContext(c).Where("email = ?", emailAddr).First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query user"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query user"})
-		return
+	} else {
+		if err := db.WithContext(c).Where("LOWER(username) = ?", strings.ToLower(identifier)).First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query user"})
+			return
+		}
 	}
 
 	if err := auth.ComparePassword(user.Password, password); err != nil {

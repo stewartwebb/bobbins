@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { authAPI } from '../services/api';
 
 const LoginPage: React.FC = () => {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -16,7 +16,7 @@ const LoginPage: React.FC = () => {
     setError('');
 
     try {
-      const response = await authAPI.login({ email, password });
+      const response = await authAPI.login({ identifier, password });
       localStorage.setItem('authToken', response.data.token);
       localStorage.setItem('authTokenExpiresAt', response.data.expires_at);
 
@@ -37,8 +37,8 @@ const LoginPage: React.FC = () => {
     }
   };
 
-  const handleEmailChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setEmail(event.target.value);
+  const handleIdentifierChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setIdentifier(event.target.value);
   };
 
   const handlePasswordChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -114,18 +114,18 @@ const LoginPage: React.FC = () => {
 
             <form onSubmit={handleLogin} className="space-y-6">
               <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium text-slate-300">
-                  Email
+                <label htmlFor="identifier" className="text-sm font-medium text-slate-300">
+                  Email or Username
                 </label>
                 <input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
+                  id="identifier"
+                  type="text"
+                  autoComplete="username"
                   required
-                  value={email}
-                  onChange={handleEmailChange}
+                  value={identifier}
+                  onChange={handleIdentifierChange}
                   className="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-3 text-slate-100 placeholder-slate-500 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40 transition"
-                  placeholder="you@example.com"
+                  placeholder="you@example.com or username"
                 />
               </div>
 
