@@ -421,7 +421,7 @@ func (c *Client) handleWebRTCSignal(eventType string, raw json.RawMessage) {
 	payload["session_id"] = c.webrtcSessionID
 
 	if !c.hub.sendToUser(targetUserID, outboundEnvelope{Type: eventType, Data: payload}) {
-		c.sendError("webrtc.unreachable", "target participant unavailable")
+		log.Printf("WebRTC signal delivery failed: channel=%d from=%d to=%d (target unavailable)", c.webrtcChannelID, c.userID, targetUserID)
 	}
 }
 
