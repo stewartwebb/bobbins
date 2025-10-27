@@ -105,7 +105,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     }
 
     const nextVolume = Number(event.target.value);
-    video.volume = Number.isFinite(nextVolume) ? nextVolume : 1;
+    video.volume = Number.isFinite(nextVolume) ? Math.max(0, Math.min(1, nextVolume)) : video.volume;
     setVolume(video.volume);
     
     if (video.volume > 0 && video.muted) {
@@ -267,7 +267,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
                 step={0.01}
                 value={volume}
                 onChange={handleVolumeSliderChange}
-                className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-slate-500"
+                className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
                 aria-label="Volume control"
               />
               <button
