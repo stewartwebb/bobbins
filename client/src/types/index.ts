@@ -254,3 +254,32 @@ export interface JoinWebRTCResponse {
   iceservers: unknown;
   sfu: unknown;
 }
+
+export interface AvatarCropData {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+}
+
+export interface SetAvatarRequest {
+  object_key: string;
+  url: string;
+  crop_data?: AvatarCropData;
+}
+
+export interface PresignAvatarUploadRequest {
+  file_name: string;
+  content_type: string;
+  file_size: number;
+}
+
+export interface PresignAvatarUploadResponse {
+  upload_url: string;
+  method: string;
+  headers: Record<string, string>;
+  object_key: string;
+  file_url: string;
+  expires_at: string;
+}

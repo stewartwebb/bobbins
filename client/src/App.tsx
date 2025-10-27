@@ -1,6 +1,17 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { LoginPage, ChatPage, RegisterPage, VerifyEmailPage, CreateServerPage, InvitePage, LogoutPage, NotFoundPage } from './pages';
+import {
+  LoginPage,
+  ChatPage,
+  RegisterPage,
+  VerifyEmailPage,
+  CreateServerPage,
+  InvitePage,
+  LogoutPage,
+  NotFoundPage,
+  UserSettingsPage,
+  ServerSettingsPage,
+} from './pages';
 
 const App: React.FC = () => {
   return (
@@ -11,6 +22,8 @@ const App: React.FC = () => {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/settings" element={<UserSettingsPage />} />
+          <Route path="/servers/:serverId/settings" element={<ServerSettingsPage />} />
           <Route path="/create-server" element={<CreateServerPage />} />
           <Route path="/invite/:code" element={<InvitePage />} />
           <Route path="/logout" element={<LogoutPage />} />

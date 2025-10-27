@@ -1,6 +1,7 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { ChatController } from '../../hooks/useChatController';
-import { IconMic, IconMicOff, IconPhone, IconVideo, IconVideoOff } from './Icons';
+import { IconMic, IconMicOff, IconPhone, IconVideo, IconVideoOff, IconSettings } from './Icons';
 import AvatarStack from './AvatarStack';
 
 const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }) => {
@@ -32,14 +33,41 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
     },
   } = controller;
 
+  const navigate = useNavigate();
+
+  const getUserInitials = () => {
+    if (!currentUser?.username) return '??';
+    return currentUser.username
+      .split(' ')
+      .map((word) => word[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+  };
+
   return (
     <aside className="hidden w-64 flex-shrink-0 border-r border-slate-800/70 bg-slate-950/75 px-4 py-6 md:flex md:flex-col">
       <header className="mb-6">
-        <p className="text-[11px] uppercase tracking-[0.35em] text-slate-500">Workspace</p>
-        <h2 className="mt-2 text-lg font-semibold text-white">{selectedServer?.name ?? 'Workspace'}</h2>
-        <p className="mt-1 font-mono text-[11px] text-slate-500">
-          bafa@chat://{selectedChannel?.name ?? 'welcome'}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1">
+            <p className="text-[11px] uppercase tracking-[0.35em] text-slate-500">Workspace</p>
+            <h2 className="mt-2 text-lg font-semibold text-white">{selectedServer?.name ?? 'Workspace'}</h2>
+            <p className="mt-1 font-mono text-[11px] text-slate-500">
+              bafa@chat://{selectedChannel?.name ?? 'welcome'}
+            </p>
+          </div>
+          {selectedServer && selectedServer.current_member_role === 'owner' && (
+            <button
+              type="button"
+              onClick={() => navigate(`/servers/${selectedServer.id}/settings`)}
+              className="mt-2 rounded-lg border border-slate-800/70 bg-slate-900/50 px-2 py-1 text-slate-400 transition hover:border-slate-700 hover:text-slate-300"
+              title="Server Settings"
+              aria-label="Server Settings"
+            >
+              <IconSettings className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </header>
 
       <nav className="flex-1 space-y-1">
@@ -209,6 +237,27 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
             </div>
           </div>
         )}
+      </div>
+
+      {/* User Profile Section */}
+      <div className="mt-4 border-t border-slate-800/70 pt-4">
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          className="flex w-full items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2 transition hover:border-slate-700 hover:bg-slate-900/70"
+        >
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-md bg-slate-800 text-xs font-semibold text-primary-200">
+            {currentUser?.avatar ? (
+              <img src={currentUser.avatar} alt={currentUser.username} className="h-full w-full object-cover" />
+            ) : (
+              <span>{getUserInitials()}</span>
+            )}
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-sm font-medium text-slate-200">{currentUser?.username ?? 'User'}</p>
+            <p className="text-xs text-slate-500">Settings</p>
+          </div>
+        </button>
       </div>
     </aside>
   );

@@ -148,6 +148,9 @@ func main() {
 			// User routes
 			protected.GET("/users/me", handlers.GetCurrentUser)
 			protected.PUT("/users/me", handlers.UpdateCurrentUser)
+			protected.POST("/users/me/avatar/presign", handlers.PresignUserAvatarUpload)
+			protected.POST("/users/me/avatar", handlers.SetUserAvatar)
+			protected.DELETE("/users/me/avatar", handlers.DeleteUserAvatar)
 
 			// Server/Guild routes
 			protected.GET("/servers", handlers.GetServers)
@@ -155,6 +158,9 @@ func main() {
 			protected.GET("/servers/:serverID", handlers.GetServer)
 			protected.GET("/servers/:serverID/participants", handlers.GetServerChannelParticipants)
 			protected.POST("/servers/:serverID/invites", handlers.CreateServerInvite)
+			protected.POST("/servers/:serverID/avatar/presign", handlers.PresignServerAvatarUpload)
+			protected.POST("/servers/:serverID/avatar", handlers.SetServerAvatar)
+			protected.DELETE("/servers/:serverID/avatar", handlers.DeleteServerAvatar)
 
 			// Channel routes
 			protected.GET("/servers/:serverID/channels", handlers.GetChannels)
