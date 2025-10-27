@@ -257,6 +257,7 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
             <p className="text-sm font-medium text-slate-200">{currentUser?.username ?? 'User'}</p>
             <p className="text-xs text-slate-500">Settings</p>
           </div>
+          <IconSettings className="h-4 w-4 text-slate-400" />
         </button>
       </div>
     </aside>
