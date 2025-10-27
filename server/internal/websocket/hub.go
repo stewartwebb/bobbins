@@ -80,7 +80,8 @@ const (
 	pongWait = 60 * time.Second
 
 	// Send pings to peer with this period (must be less than pongWait)
-	// Railway.com recommends sending keepalive traffic every 10-30 seconds
+	// Railway.com recommends sending keepalive traffic every 10-30 seconds.
+	// We use 25 seconds as it's within their range and less than pongWait.
 	pingPeriod = 25 * time.Second
 
 	// Maximum message size allowed from peer
