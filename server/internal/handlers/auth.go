@@ -120,8 +120,11 @@ func Login(c *gin.Context) {
 			return
 		}
 	} else {
+		// Escape ILIKE special characters to prevent pattern matching injection
+		escapedIdentifier := strings.ReplaceAll(identifier, "%", "\\%")
+		escapedIdentifier = strings.ReplaceAll(escapedIdentifier, "_", "\\_")
 		// Use case-insensitive comparison for username (PostgreSQL ILIKE)
-		if err := db.WithContext(c).Where("username ILIKE ?", identifier).First(&user).Error; err != nil {
+		if err := db.WithContext(c).Where("username ILIKE ?", escapedIdentifier).First(&user).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 				return
@@ -261,9 +264,17 @@ func isEmailFormat(identifier string) bool {
 	if atIndex <= 0 || atIndex >= len(identifier)-1 {
 		return false
 	}
-	// Ensure there's only one @ symbol and it has a dot after it (simple domain check)
+	// Ensure there's only one @ symbol
+	if strings.Count(identifier, "@") != 1 {
+		return false
+	}
+	// Check domain part has a dot and doesn't start/end with a dot
 	afterAt := identifier[atIndex+1:]
-	return strings.Count(identifier, "@") == 1 && strings.Contains(afterAt, ".")
+	dotIndex := strings.Index(afterAt, ".")
+	if dotIndex <= 0 || dotIndex >= len(afterAt)-1 {
+		return false
+	}
+	return true
 }
 
 func ensureUniqueUser(db *gorm.DB, username, email string) error {
