@@ -20,6 +20,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const formatTimestamp = useCallback((value: number) => {
@@ -44,6 +45,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     setDuration(video.duration || 0);
     setProgress(video.currentTime || 0);
     setIsMuted(video.muted || video.volume === 0);
+    setVolume(video.volume);
   }, []);
 
   const handleTimeUpdate = useCallback(() => {
@@ -96,6 +98,22 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     setIsMuted(next || video.volume === 0);
   }, []);
 
+  const handleVolumeSliderChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    const nextVolume = Number(event.target.value);
+    video.volume = Number.isFinite(nextVolume) ? Math.max(0, Math.min(1, nextVolume)) : video.volume;
+    setVolume(video.volume);
+    
+    if (video.volume > 0 && video.muted) {
+      video.muted = false;
+    }
+    setIsMuted(video.muted || video.volume === 0);
+  }, []);
+
   const handleVolumeChange = useCallback(() => {
     const video = videoRef.current;
     if (!video) {
@@ -103,6 +121,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     }
 
     setIsMuted(video.muted || video.volume === 0);
+    setVolume(video.volume);
   }, []);
 
   const handleEnded = useCallback(() => {
@@ -187,6 +206,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
     setProgress(0);
     setDuration(0);
     setIsMuted(video.muted || video.volume === 0);
+    setVolume(video.volume);
   }, [attachment.id]);
 
   return (
@@ -240,6 +260,16 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
               >
                 {isMuted ? <IconVolumeMute /> : <IconVolume />}
               </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onChange={handleVolumeSliderChange}
+                className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+                aria-label="Volume control"
+              />
               <button
                 type="button"
                 onClick={handleToggleFullscreen}
