@@ -1,12 +1,14 @@
 import React from 'react';
-import type { WebRTCParticipant } from '../../../../types';
-import { IconMic, IconMicOff } from './Icons';
+import type { WebRTCParticipant, User } from '../../../../types';
+import { IconMic, IconMicOff, IconVideo, IconVideoOff } from './Icons';
 
 interface AvatarStackProps {
   participants: WebRTCParticipant[];
+  // optional current user so we can use their avatar as a fallback for the local participant
+  currentUser?: User | null;
 }
 
-const AvatarStack: React.FC<AvatarStackProps> = ({ participants }) => {
+const AvatarStack: React.FC<AvatarStackProps> = ({ participants, currentUser = null }) => {
   if (!participants || participants.length === 0) {
     return null;
   }
@@ -39,22 +41,30 @@ const AvatarStack: React.FC<AvatarStackProps> = ({ participants }) => {
             className="flex items-center justify-between rounded-md bg-slate-900/60 px-2 py-1 text-sm text-slate-200"
           >
             <div className="flex min-w-0 items-center gap-2">
-              {participant.avatar ? (
-                <img
-                  src={participant.avatar}
-                  alt={displayName}
-                  className="h-7 w-7 flex-shrink-0 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">
-                  {getInitials(displayName)}
-                </div>
-              )}
+              {(() => {
+                const avatarSrc = participant.avatar || (currentUser && currentUser.id === participant.user_id ? currentUser.avatar : undefined);
+                if (avatarSrc) {
+                  return (
+                    <img src={avatarSrc} alt={displayName} className="h-7 w-7 flex-shrink-0 rounded-full object-cover" />
+                  );
+                }
+
+                return (
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">
+                    {getInitials(displayName)}
+                  </div>
+                );
+              })()}
               <span className="truncate">{displayName}</span>
             </div>
-            <span className={`flex-shrink-0 ${micOn ? 'text-emerald-300' : 'text-slate-500'}`} aria-label={micOn ? 'Microphone on' : 'Microphone muted'}>
-              {micOn ? <IconMic className="h-4 w-4" /> : <IconMicOff className="h-4 w-4" />}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`flex-shrink-0 ${micOn ? 'text-emerald-300' : 'text-slate-500'}`} aria-label={micOn ? 'Microphone on' : 'Microphone muted'}>
+                {micOn ? <IconMic className="h-4 w-4" /> : <IconMicOff className="h-4 w-4" />}
+              </span>
+              <span className={`flex-shrink-0 ${participant.media_state?.camera === 'on' ? 'text-emerald-300' : 'text-slate-500'}`} aria-label={participant.media_state?.camera === 'on' ? 'Camera on' : 'Camera off'}>
+                {participant.media_state?.camera === 'on' ? <IconVideo className="h-4 w-4" /> : <IconVideoOff className="h-4 w-4" />}
+              </span>
+            </div>
           </div>
         );
       })}
