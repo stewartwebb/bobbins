@@ -1070,6 +1070,29 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
 
+    const channelId = session.channelId;
+    const selfId = session.participant?.user_id;
+    if (typeof selfId === 'number') {
+      setChannelParticipants((prev) => {
+        const current = prev[channelId] || [];
+        const updated = removeParticipantById(current, selfId);
+
+        if (updated.length === current.length) {
+          return prev;
+        }
+
+        if (updated.length === 0) {
+          const { [channelId]: _removed, ...rest } = prev;
+          return rest;
+        }
+
+        return {
+          ...prev,
+          [channelId]: updated,
+        };
+      });
+    }
+
     pendingWebRTCAuthRef.current = null;
     updateWebRTCState(() => null);
     setWebrtcError(null);
@@ -1139,6 +1162,11 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         sfu: response.sfu,
         status: 'authenticating',
       };
+
+      setChannelParticipants((previous) => ({
+        ...previous,
+        [selectedChannel.id]: roster,
+      }));
 
       updateWebRTCState(() => session);
 
