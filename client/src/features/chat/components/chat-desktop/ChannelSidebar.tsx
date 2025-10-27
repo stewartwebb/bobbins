@@ -4,7 +4,12 @@ import type { ChatController } from '../../hooks/useChatController';
 import { IconMic, IconMicOff, IconPhone, IconVideo, IconVideoOff, IconSettings } from './Icons';
 import AvatarStack from './AvatarStack';
 
-const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }) => {
+type ChannelSidebarProps = {
+  controller: ChatController;
+  onOpenUserSettings?: () => void;
+};
+
+const ChannelSidebar: React.FC<ChannelSidebarProps> = ({ controller, onOpenUserSettings }) => {
   const {
     state: {
       selectedServer,
@@ -243,7 +248,13 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
       <div className="mt-4 border-t border-slate-800/70 pt-4">
         <button
           type="button"
-          onClick={() => navigate('/settings')}
+          onClick={() => {
+            if (onOpenUserSettings) {
+              onOpenUserSettings();
+            } else {
+              navigate('/settings');
+            }
+          }}
           className="flex w-full items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2 transition hover:border-slate-700 hover:bg-slate-900/70"
         >
           <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-md bg-slate-800 text-xs font-semibold text-primary-200">

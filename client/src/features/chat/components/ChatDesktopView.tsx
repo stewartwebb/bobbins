@@ -6,6 +6,7 @@ import ChatMainArea from './chat-desktop/ChatMainArea';
 import CreateChannelDialog from './chat-desktop/CreateChannelDialog';
 import ServerSidebar from './chat-desktop/ServerSidebar';
 import AudioSessionBridge from './chat-desktop/AudioSessionBridge';
+import UserSettingsModal from './chat-desktop/UserSettingsModal';
 
 type ChatDesktopViewProps = {
   controller: ChatController;
@@ -37,6 +38,7 @@ const ChatDesktopView: React.FC<ChatDesktopViewProps> = ({ controller }) => {
   } = controller;
 
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -96,7 +98,7 @@ const ChatDesktopView: React.FC<ChatDesktopViewProps> = ({ controller }) => {
       <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950/85" aria-hidden="true" />
       <div className="relative z-10 flex min-h-dvh flex-1 flex-col overflow-hidden md:min-h-screen md:flex-row">
         <ServerSidebar controller={controller} />
-        <ChannelSidebar controller={controller} />
+        <ChannelSidebar controller={controller} onOpenUserSettings={() => setIsUserSettingsOpen(true)} />
         <div className="min-h-0 min-w-0 flex-1">
           <ChatMainArea controller={controller} onOpenNavigation={() => setIsMobileNavOpen(true)} />
         </div>
@@ -263,6 +265,7 @@ const ChatDesktopView: React.FC<ChatDesktopViewProps> = ({ controller }) => {
 
       <CreateChannelDialog controller={controller} />
       <AttachmentPreviewDialog controller={controller} />
+      <UserSettingsModal isOpen={isUserSettingsOpen} onClose={() => setIsUserSettingsOpen(false)} />
 
       {isServerActionOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
