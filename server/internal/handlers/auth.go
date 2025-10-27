@@ -108,8 +108,8 @@ func Login(c *gin.Context) {
 	password := strings.TrimSpace(req.Password)
 
 	var user models.User
-	// Check if identifier contains @ to determine if it's an email or username
-	if strings.Contains(identifier, "@") {
+	// Check if identifier looks like an email (contains @ and has text before and after it)
+	if isEmailFormat(identifier) {
 		emailAddr := strings.ToLower(identifier)
 		if err := db.WithContext(c).Where("email = ?", emailAddr).First(&user).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -120,7 +120,8 @@ func Login(c *gin.Context) {
 			return
 		}
 	} else {
-		if err := db.WithContext(c).Where("LOWER(username) = ?", strings.ToLower(identifier)).First(&user).Error; err != nil {
+		// Use case-insensitive comparison for username (PostgreSQL ILIKE)
+		if err := db.WithContext(c).Where("username ILIKE ?", identifier).First(&user).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 				return
@@ -253,6 +254,17 @@ func UpdateCurrentUser(c *gin.Context) {
 }
 
 var errUserConflict = errors.New("username or email already in use")
+
+func isEmailFormat(identifier string) bool {
+	// Basic email validation: contains @ with non-empty parts before and after
+	atIndex := strings.Index(identifier, "@")
+	if atIndex <= 0 || atIndex >= len(identifier)-1 {
+		return false
+	}
+	// Ensure there's only one @ symbol and it has a dot after it (simple domain check)
+	afterAt := identifier[atIndex+1:]
+	return strings.Count(identifier, "@") == 1 && strings.Contains(afterAt, ".")
+}
 
 func ensureUniqueUser(db *gorm.DB, username, email string) error {
 	var count int64
