@@ -304,7 +304,7 @@ const ChatDesktopView: React.FC<ChatDesktopViewProps> = ({ controller }) => {
       )}
 
       {showConnectionOverlay && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/90 backdrop-blur">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur">
           <div className="relative w-full max-w-sm rounded-2xl border border-slate-800/80 bg-slate-950/95 p-6 text-center shadow-2xl shadow-slate-900/40">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center">
               <span

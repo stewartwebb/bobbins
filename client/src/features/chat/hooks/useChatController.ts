@@ -617,6 +617,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         connection.ontrack = null;
         connection.onnegotiationneeded = null;
         connection.onconnectionstatechange = null;
+        connection.oniceconnectionstatechange = null;
         connection.getSenders().forEach((sender) => {
           try {
             connection.removeTrack(sender);
@@ -830,6 +831,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         connection.ontrack = null;
         connection.onnegotiationneeded = null;
         connection.onconnectionstatechange = null;
+        connection.oniceconnectionstatechange = null;
         connection.getSenders().forEach((sender) => {
           try {
             connection.removeTrack(sender);
@@ -936,7 +938,30 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
       connection.onconnectionstatechange = () => {
         const state = connection.connectionState;
+        console.log(`Connection state changed for user ${targetUserId}:`, state);
         if (state === 'failed' || state === 'closed') {
+          closePeerConnection(targetUserId);
+        }
+      };
+
+      connection.oniceconnectionstatechange = () => {
+        const iceState = connection.iceConnectionState;
+        console.log(`ICE connection state changed for user ${targetUserId}:`, iceState);
+        
+        if (iceState === 'failed') {
+          console.log(`ICE connection failed for user ${targetUserId}, attempting to restart ICE`);
+          // Restart ICE to attempt recovery
+          connection.restartIce();
+        } else if (iceState === 'disconnected') {
+          console.log(`ICE connection disconnected for user ${targetUserId}, monitoring for recovery`);
+          // Give it some time to reconnect before taking action
+          setTimeout(() => {
+            if (connection.iceConnectionState === 'disconnected') {
+              console.log(`ICE still disconnected after timeout for user ${targetUserId}, restarting ICE`);
+              connection.restartIce();
+            }
+          }, 5000);
+        } else if (iceState === 'closed') {
           closePeerConnection(targetUserId);
         }
       };
@@ -2154,6 +2179,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
   useEffect(() => {
     const handleOffline = () => {
+      console.log('Network went offline, closing WebSocket and monitoring WebRTC connections');
       setWsStatus('error');
 
       try {
@@ -2164,13 +2190,31 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         console.info('Websocket close on offline failed', offlineError);
       }
 
+      // Mark all peer connections for monitoring
+      peerConnectionsRef.current.forEach((connection, userId) => {
+        console.log(`Monitoring peer connection ${userId} during offline event`);
+        // Don't close connections immediately - let ICE connection state handler manage them
+      });
+
       scheduleReconnect();
     };
 
     const handleOnline = () => {
+      console.log('Network came back online, reconnecting WebSocket');
       clearRetryTimeout();
       setWsStatus('connecting');
       setWsRetryCount((count) => count + 1);
+
+      // Re-authenticate WebRTC session if we have one
+      const activeSession = webrtcSessionRef.current;
+      if (activeSession && activeSession.status === 'connected') {
+        console.log('Re-authenticating WebRTC session after network recovery');
+        // The new WebSocket connection will re-authenticate when it opens
+        pendingWebRTCAuthRef.current = {
+          sessionToken: activeSession.sessionToken,
+          channelId: activeSession.channelId,
+        };
+      }
     };
 
     window.addEventListener('offline', handleOffline);
