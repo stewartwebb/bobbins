@@ -232,6 +232,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const previousScrollTopRef = useRef(0);
   const isPrependingRef = useRef(false);
   const forceScrollToBottomRef = useRef(true);
+  // When switching channels we briefly suppress the "load older messages" trigger
+  // because the container starts at the top before we programmatically scroll
+  // to the bottom. This prevents an immediate eager fetch for older messages.
+  const suppressFetchOlderRef = useRef(false);
+  // Timer ref used to debounce end of resizing / image loads before we stop forcing
+  // pinned-to-bottom behavior.
+  const resizeSettleTimerRef = useRef<number | null>(null);
+  // Timer ref used to debounce the initial programmatic scroll when switching
+  // channels so we don't immediately trigger older-message loads.
+  const initialScrollTimerRef = useRef<number | null>(null);
   const currentUserIdRef = useRef<number | null>(null);
   const typingCleanupTimerRef = useRef<number | null>(null);
   const typingCooldownRef = useRef(0);
@@ -312,6 +322,33 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     isTypingRef.current = false;
     typingCooldownRef.current = 0;
     previousChannelIdRef.current = nextId;
+  }, [selectedChannel?.id]);
+
+  // When switching channels we want to suppress immediate "load older messages"
+  // triggers and ensure we pin to the bottom until content settles. This avoids
+  // the situation where the container starts at scrollTop=0 and fires a
+  // fetchOlderMessages before our auto-scroll runs.
+  useEffect(() => {
+    suppressFetchOlderRef.current = true;
+    forceScrollToBottomRef.current = true;
+
+    if (initialScrollTimerRef.current !== null) {
+      window.clearTimeout(initialScrollTimerRef.current);
+    }
+
+    // Allow programmatic scrolling and content settling to complete before
+    // enabling the top-of-list lazy-load again.
+    initialScrollTimerRef.current = window.setTimeout(() => {
+      suppressFetchOlderRef.current = false;
+      initialScrollTimerRef.current = null;
+    }, 800);
+
+    return () => {
+      if (initialScrollTimerRef.current !== null) {
+        window.clearTimeout(initialScrollTimerRef.current);
+        initialScrollTimerRef.current = null;
+      }
+    };
   }, [selectedChannel?.id]);
 
   useEffect(() => {
@@ -396,12 +433,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     }
 
     const distanceFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
-    if (forceScrollToBottomRef.current || distanceFromBottom <= 160) {
-      container.scrollTo({
-        top: container.scrollHeight,
-        behavior: forceScrollToBottomRef.current ? 'smooth' : 'auto',
-      });
-      forceScrollToBottomRef.current = false;
+
+    if (forceScrollToBottomRef.current) {
+      // Use an immediate jump when we are explicitly forcing the scroll so
+      // dynamically loading content can’t interrupt the positioning.
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+
+    if (distanceFromBottom <= 160) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
     }
   }, []);
 
@@ -2616,7 +2657,19 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
 
-    const handleScroll = () => {
+    const handleScroll = (event?: Event) => {
+      // If we're suppressing fetches (initial channel load), ignore programmatic
+      // or incidental scroll events until the user explicitly scrolls (isTrusted)
+      if (suppressFetchOlderRef.current) {
+        if (event && (event as Event).isTrusted) {
+          // user-initiated -> stop suppressing
+          suppressFetchOlderRef.current = false;
+        } else {
+          // ignore this scroll event
+          return;
+        }
+      }
+
       if (container.scrollTop <= 120) {
         fetchOlderMessages();
       }
@@ -2624,6 +2677,11 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       const distanceFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
       if (distanceFromBottom <= 160) {
         setUnreadMessageCount(0);
+      }
+
+      // If the user has scrolled away from the bottom, disable auto-pinning
+      if ((event as Event)?.isTrusted && distanceFromBottom > 160) {
+        forceScrollToBottomRef.current = false;
       }
     };
 
@@ -2916,13 +2974,36 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
 
-    const observer = new ResizeObserver(() => ensurePinnedToBottom());
+    const observer = new ResizeObserver(() => {
+      ensurePinnedToBottom();
+
+      // If we are forcing pin-to-bottom (e.g. initial channel open), keep
+      // forcing until the content settles (images load, fonts, etc.). Debounce
+      // clearing the forced state so we continue to auto-scroll while things
+      // are changing.
+      if (forceScrollToBottomRef.current) {
+        if (resizeSettleTimerRef.current !== null) {
+          window.clearTimeout(resizeSettleTimerRef.current);
+        }
+        resizeSettleTimerRef.current = window.setTimeout(() => {
+          forceScrollToBottomRef.current = false;
+          resizeSettleTimerRef.current = null;
+        }, 700);
+      }
+    });
+
     observer.observe(container);
     if (content) {
       observer.observe(content);
     }
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (resizeSettleTimerRef.current !== null) {
+        window.clearTimeout(resizeSettleTimerRef.current);
+        resizeSettleTimerRef.current = null;
+      }
+    };
   }, [ensurePinnedToBottom]);
 
   useEffect(() => {
