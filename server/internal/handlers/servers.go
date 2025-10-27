@@ -386,6 +386,8 @@ func GetServerChannelParticipants(c *gin.Context) {
 					"media_state":  participant.MediaState,
 					"channel_id":   participant.ChannelID,
 					"last_seen":    participant.LastSeen.Format(time.RFC3339),
+					"username":     "",
+					"avatar":       "",
 				}
 				if ok {
 					serialized["username"] = user.Username
@@ -394,7 +396,7 @@ func GetServerChannelParticipants(c *gin.Context) {
 				serializedParticipants = append(serializedParticipants, serialized)
 			}
 
-			result[fmt.Sprintf("%d", channel.ID)] = serializedParticipants
+			result[strconv.Itoa(int(channel.ID))] = serializedParticipants
 		}
 	}
 

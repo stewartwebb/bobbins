@@ -22,6 +22,7 @@ import {
   GetMessagesParams,
   GetMessagesResponse,
   JoinWebRTCResponse,
+  WebRTCParticipant,
 } from '../types/index';
 
 export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080/api/v1';
@@ -86,8 +87,8 @@ export const serversAPI = {
     return response.data;
   },
 
-  getChannelParticipants: async (serverId: number): Promise<{ [channelId: string]: any[] }> => {
-    const response = await api.get<{ data: { [channelId: string]: any[] } }>(`/servers/${serverId}/participants`);
+  getChannelParticipants: async (serverId: number): Promise<{ [channelId: string]: WebRTCParticipant[] }> => {
+    const response = await api.get<{ data: { [channelId: string]: WebRTCParticipant[] } }>(`/servers/${serverId}/participants`);
     return response.data.data;
   },
 };
