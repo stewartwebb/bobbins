@@ -2880,6 +2880,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     handleIncomingCandidate,
     teardownWebRTCSession,
     setAutoScrollOnNextRender,
+    channels,
+    notificationsEnabled,
+    selectedServer,
+    webrtcState,
   ]);
 
   useEffect(() => {
