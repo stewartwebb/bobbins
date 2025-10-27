@@ -230,8 +230,7 @@ const VideoAttachmentPlayer: React.FC<VideoAttachmentPlayerProps> = ({ attachmen
         />
         {!isPlaying && (
           <div 
-            className="absolute inset-0 flex items-center justify-center bg-black/30 cursor-pointer transition-opacity hover:bg-black/40"
-            onClick={handleTogglePlay}
+            className="absolute inset-0 flex items-center justify-center bg-black/30 transition-opacity hover:bg-black/40"
           >
             <button
               type="button"

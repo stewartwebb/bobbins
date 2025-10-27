@@ -493,27 +493,18 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
                               })();
 
                               return (
-                                <div key={message.id} className="space-y-2">
-                                  {showTimestamp && (
-                                    <div className="flex items-baseline justify-end">
-                                      <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-slate-500">
-                                        {formatTimestamp(message.created_at)}
-                                      </span>
-                                    </div>
-                                  )}
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex-1 space-y-2">
-                                      {hasContent && <MarkdownMessage content={message.content} />}
-                                      {attachmentList.length > 0 && (
-                                        <div className="flex flex-col gap-2">
-                                          {attachmentList.map((attachment) => renderAttachment(attachment))}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <span className="flex-shrink-0 pt-1 font-mono text-[10px] text-slate-500 opacity-0 transition-opacity group-hover:opacity-100">
-                                      {formatTimestamp(message.created_at)}
-                                    </span>
+                                <div key={message.id} className="flex items-start justify-between gap-3">
+                                  <div className="flex-1 space-y-2">
+                                    {hasContent && <MarkdownMessage content={message.content} />}
+                                    {attachmentList.length > 0 && (
+                                      <div className="flex flex-col gap-2">
+                                        {attachmentList.map((attachment) => renderAttachment(attachment))}
+                                      </div>
+                                    )}
                                   </div>
+                                  <span className={`flex-shrink-0 pt-1 font-mono text-[10px] text-slate-500 transition-opacity ${showTimestamp ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                    {formatTimestamp(message.created_at)}
+                                  </span>
                                 </div>
                               );
                             })}
