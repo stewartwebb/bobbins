@@ -1456,6 +1456,12 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                 error: undefined,
               };
               webrtcSessionRef.current = next;
+              // Play a join sound when we successfully connect our own audio session
+              try {
+                notificationSounds.play('join_channel');
+              } catch (playError) {
+                console.debug('Failed to play join sound', playError);
+              }
               return next;
             });
 
@@ -1606,6 +1612,13 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               pendingWebRTCAuthRef.current = null;
               webrtcSessionRef.current = null;
               teardownWebRTCSession();
+              // Play a leave sound when the current user is removed (left) from the audio channel
+              try {
+                notificationSounds.play('leave_channel');
+              } catch (playError) {
+                console.debug('Failed to play leave sound', playError);
+              }
+
               setWebrtcError((current) => current ?? 'You left the audio channel.');
             } else {
               // Play leave sound when someone else leaves
