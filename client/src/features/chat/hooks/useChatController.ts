@@ -44,6 +44,7 @@ type WebSocketEnvelope = {
     media_state?: WebRTCMediaState;
     [key: string]: unknown;
   };
+
 };
 
 export type ChatController = ReturnType<typeof useChatController>;
@@ -1286,56 +1287,6 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     },
     []
   );
-
-  const drainPendingIceCandidates = useCallback(async (userId: number, connection: RTCPeerConnection) => {
-    const pending = pendingCandidatesRef.current.get(userId);
-    if (!pending || pending.length === 0) {
-      return;
-    }
-
-    peerConnectionsRef.current.delete(userId);
-    pendingCandidatesRef.current.delete(userId);
-    makingOfferRef.current.delete(userId);
-    ignoreOfferRef.current.delete(userId);
-    settingRemoteAnswerRef.current.delete(userId);
-
-    try {
-      connection.onicecandidate = null;
-      connection.ontrack = null;
-      connection.onnegotiationneeded = null;
-      connection.onconnectionstatechange = null;
-      connection.getSenders().forEach((sender) => {
-        try {
-          connection.removeTrack(sender);
-        } catch (removeError) {
-          console.debug("removeTrack failed during close", removeError);
-        }
-      });
-      connection.close();
-    } catch (connectionError) {
-      console.debug("Error closing peer connection", connectionError);
-    }
-
-    const remoteStream = remoteStreamsRef.current.get(userId);
-    if (remoteStream) {
-      remoteStream.getTracks().forEach((track) => track.stop());
-      remoteStreamsRef.current.delete(userId);
-    }
-
-    setRemoteMediaStreams((previous) => {
-      if (!(userId in previous)) {
-        return previous;
-      }
-      const { [userId]: _, ...rest } = previous;
-      return rest;
-    });
-
-    const mediaElement = remoteMediaElementsRef.current.get(userId);
-    if (mediaElement) {
-      mediaElement.srcObject = null;
-      remoteMediaElementsRef.current.delete(userId);
-    }
-  }, []);
 
   const drainPendingIceCandidates = useCallback(
     async (userId: number, connection: RTCPeerConnection) => {
@@ -4168,4 +4119,3 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       },
     };
   };
-};
