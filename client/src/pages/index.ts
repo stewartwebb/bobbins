@@ -5,3 +5,4 @@ export { default as VerifyEmailPage } from './VerifyEmailPage';
 export { default as CreateServerPage } from './CreateServerPage';
 export { default as InvitePage } from './InvitePage';
 export { default as LogoutPage } from './LogoutPage';
+export { default as NotFoundPage } from './NotFoundPage';
