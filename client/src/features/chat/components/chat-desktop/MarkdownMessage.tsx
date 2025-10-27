@@ -118,34 +118,40 @@ const markdownComponents: Components = {
     );
   },
   table: ({ children, ...props }) => (
-    <div className="overflow-x-auto">
-      <table {...props} className="w-full table-auto border-collapse text-sm text-slate-200">
+    <div className="overflow-x-auto rounded-xl border border-slate-800/70 bg-slate-950/70 shadow-lg">
+      <table {...props} className="min-w-full table-auto border-collapse text-sm text-slate-200">
         {children}
       </table>
     </div>
   ),
   thead: ({ children, ...props }) => (
-    <thead {...props} className="bg-slate-900/60 text-left">
+    <thead {...props} className="bg-slate-900/80 text-left uppercase tracking-wide text-primary-200">
       {children}
     </thead>
   ),
   tbody: ({ children, ...props }) => (
-    <tbody {...props} className="divide-y divide-slate-800/70">
+    <tbody {...props} className="divide-y divide-slate-800/60">
       {children}
     </tbody>
   ),
   tr: ({ children, ...props }) => (
-    <tr {...props} className="border-b border-slate-800/60 last:border-0">
+    <tr
+      {...props}
+      className="border-b border-slate-800/50 last:border-0 odd:bg-slate-950/40 even:bg-slate-900/30 hover:bg-slate-900/60 transition-colors duration-150"
+    >
       {children}
     </tr>
   ),
   th: ({ children, ...props }) => (
-    <th {...props} className="px-3 py-2 font-semibold text-slate-100">
+    <th
+      {...props}
+      className="px-4 py-3 text-xs font-semibold tracking-wide text-primary-100 first:rounded-tl-xl last:rounded-tr-xl"
+    >
       {children}
     </th>
   ),
   td: ({ children, ...props }) => (
-    <td {...props} className="px-3 py-2 align-top">
+    <td {...props} className="px-4 py-3 align-top text-slate-200/90">
       {children}
     </td>
   ),
