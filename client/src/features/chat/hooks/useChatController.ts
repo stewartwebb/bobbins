@@ -2289,7 +2289,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
     messageInputRef.current?.focus();
-  }, [selectedChannel, pendingFiles]);
+  }, [selectedChannel]);
 
   useEffect(() => {
     if (!previewAttachment) {
