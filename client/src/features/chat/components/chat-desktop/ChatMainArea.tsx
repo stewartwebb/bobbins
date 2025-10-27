@@ -72,6 +72,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
       handleDragOver,
       handleDragLeave,
       handleDrop,
+      handlePaste,
       handleJumpToBottom,
       handleSendMessage,
       handleMessageChange,
@@ -596,6 +597,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
                   onChange={handleMessageChange}
                   onKeyDown={handleMessageKeyDown}
                   onBlur={handleMessageBlur}
+                  onPaste={handlePaste}
                   ref={messageInputRef}
                   placeholder={messagePlaceholder}
                   disabled={!canSendMessages || !selectedChannel || wsStatus !== 'connected'}

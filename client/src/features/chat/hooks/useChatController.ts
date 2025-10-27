@@ -7,6 +7,7 @@ import {
 } from 'react';
 import type {
   ChangeEvent,
+  ClipboardEvent as ReactClipboardEvent,
   DragEvent as ReactDragEvent,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
@@ -2452,6 +2453,41 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     [processFiles]
   );
 
+  const handlePaste = useCallback(
+    (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+      if (!selectedChannel || selectedChannel.type !== 'text') {
+        return;
+      }
+
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) {
+        return;
+      }
+
+      // Check if clipboard contains files
+      const items = clipboardData.items;
+      const files: File[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) {
+            files.push(file);
+          }
+        }
+      }
+
+      // If files were found, process them and prevent default paste behavior
+      if (files.length > 0) {
+        event.preventDefault();
+        processFiles(files);
+      }
+      // If no files, allow normal paste behavior (text)
+    },
+    [selectedChannel, processFiles]
+  );
+
   const sendMessage = useCallback(async () => {
     if (isSendingMessage) {
       return;
@@ -3288,6 +3324,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         handleDragEnter,
         handleDragLeave,
         handleDrop,
+        handlePaste,
         handleManualReconnect,
         handleJumpToBottom,
         handleToggleMic,
