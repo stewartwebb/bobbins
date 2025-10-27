@@ -28,7 +28,9 @@ import {
   SetAvatarRequest,
 } from '../types/index';
 
-export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080/api/v1';
+// Default to a relative path so production builds don't accidentally call localhost.
+// Set REACT_APP_API_URL at build time when the API lives on another host.
+export const API_BASE_URL = process.env.REACT_APP_API_URL || '/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -223,6 +225,24 @@ export const avatarsAPI = {
   presignUserAvatarUpload: async (request: PresignAvatarUploadRequest): Promise<PresignAvatarUploadResponse> => {
     const response = await api.post<{ data: PresignAvatarUploadResponse }>('/users/me/avatar/presign', request);
     return response.data.data;
+  },
+
+  // Upload avatar directly (multipart/form-data). Accepts file and optional crop_data JSON string.
+  uploadUserAvatar: async (file: File, cropData?: unknown): Promise<User> => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    if (cropData) {
+      form.append('crop_data', JSON.stringify(cropData));
+    }
+
+    const response = await api.post<{ message: string; data: { user: User } }>('/users/me/avatar', form, {
+      headers: {
+        // Let axios set the multipart boundary automatically.
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    return response.data.data.user;
   },
 
   setUserAvatar: async (request: SetAvatarRequest): Promise<User> => {

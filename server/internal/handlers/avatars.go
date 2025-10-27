@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 
 	"bafachat/internal/avatars"
 	"bafachat/internal/models"
@@ -76,6 +79,142 @@ func SetUserAvatar(c *gin.Context) {
 		return
 	}
 
+	// Support two modes:
+	// 1) JSON body with object_key (existing presign + set flow)
+	// 2) multipart/form-data upload with field "file" and optional "crop_data" JSON string
+
+	contentType := c.Request.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/") {
+		// Direct upload path
+		fileHeader, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+			return
+		}
+
+		if fileHeader.Size <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file must be greater than 0 bytes"})
+			return
+		}
+
+		f, err := fileHeader.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
+			return
+		}
+		defer f.Close()
+
+		// Read file into memory (avatars are expected to be small)
+		buf, err := io.ReadAll(f)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
+			return
+		}
+
+		detectedContentType := fileHeader.Header.Get("Content-Type")
+		if detectedContentType == "" {
+			detectedContentType = http.DetectContentType(buf)
+		}
+
+		if !avatars.IsValidImageType(detectedContentType) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image type"})
+			return
+		}
+
+		// Parse optional crop_data
+		var cropData *avatars.CropData
+		cropJSON := c.PostForm("crop_data")
+		if cropJSON != "" {
+			var md models.AvatarCropData
+			if err := json.Unmarshal([]byte(cropJSON), &md); err == nil {
+				cropData = &avatars.CropData{
+					X:      md.X,
+					Y:      md.Y,
+					Width:  md.Width,
+					Height: md.Height,
+					Scale:  md.Scale,
+				}
+			}
+		}
+
+		// Upload original file
+		originalResult, err := storageService.UploadAvatarObject(
+			c.Request.Context(),
+			fileHeader.Filename,
+			detectedContentType,
+			int64(len(buf)),
+			bytes.NewReader(buf),
+			"users",
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload original avatar"})
+			return
+		}
+
+		// Process and upload thumbnail
+		processedBytes, processedContentType, err := avatars.ProcessAvatar(bytes.NewReader(buf), detectedContentType, cropData)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to process avatar: %v", err)})
+			return
+		}
+
+		thumbnailResult, err := storageService.UploadAvatarObject(
+			c.Request.Context(),
+			"avatar-thumbnail.jpg",
+			processedContentType,
+			int64(len(processedBytes)),
+			bytes.NewReader(processedBytes),
+			"users",
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload processed avatar"})
+			return
+		}
+
+		// Serialize crop data for storage
+		cropDataJSON := ""
+		if cropData != nil {
+			cropDataJSON, err = avatars.SerializeCropData(cropData)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save crop data"})
+				return
+			}
+		}
+
+		// Update user record
+		var user models.User
+		if err := db.WithContext(c).First(&user, claims.UserID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load user"})
+			return
+		}
+
+		updates := map[string]interface{}{
+			"avatar":              thumbnailResult.FileURL,
+			"avatar_original_key": originalResult.ObjectKey,
+			"avatar_crop_data":    cropDataJSON,
+		}
+
+		if err := db.WithContext(c).Model(&user).Updates(updates).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update avatar"})
+			return
+		}
+
+		// Reload user to get updated values
+		if err := db.WithContext(c).First(&user, claims.UserID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload user"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Avatar updated successfully",
+			"data": gin.H{
+				"user": serializeUser(user),
+			},
+		})
+		return
+	}
+
+	// Fallback: existing presign-based flow (JSON body)
 	var req models.SetAvatarRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

@@ -28,23 +28,8 @@ export const UserSettingsPage: React.FC = () => {
 
   const handleAvatarSave = async (file: File, cropData: AvatarCropData) => {
     try {
-      // Step 1: Get presigned upload URL
-      const presignResponse = await avatarsAPI.presignUserAvatarUpload({
-        file_name: file.name,
-        content_type: file.type,
-        file_size: file.size,
-      });
-
-      // Step 2: Upload file to object storage
-      await avatarsAPI.uploadFile(presignResponse.upload_url, file, presignResponse.headers);
-
-      // Step 3: Set avatar with crop data
-      const updatedUser = await avatarsAPI.setUserAvatar({
-        object_key: presignResponse.object_key,
-        url: presignResponse.file_url,
-        crop_data: cropData,
-      });
-
+      // Upload directly to the API as multipart/form-data. Server will process and create thumbnails.
+      const updatedUser = await avatarsAPI.uploadUserAvatar(file, cropData);
       setUser(updatedUser);
     } catch (err) {
       console.error('Failed to save avatar:', err);
