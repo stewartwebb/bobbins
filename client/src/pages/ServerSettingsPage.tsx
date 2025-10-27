@@ -57,7 +57,7 @@ export const ServerSettingsPage: React.FC = () => {
       setServer(updatedServer);
     } catch (err) {
       console.error('Failed to save server avatar:', err);
-      throw err;
+      throw new Error('Failed to save server avatar. Please try again.');
     }
   };
 
@@ -69,7 +69,7 @@ export const ServerSettingsPage: React.FC = () => {
       setServer(updatedServer);
     } catch (err) {
       console.error('Failed to delete server avatar:', err);
-      throw err;
+      throw new Error('Failed to delete server avatar. Please try again.');
     }
   };
 

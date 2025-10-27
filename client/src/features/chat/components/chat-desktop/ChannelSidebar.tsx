@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ChatController } from '../../hooks/useChatController';
-import { IconMic, IconMicOff, IconPhone, IconVideo, IconVideoOff } from './Icons';
+import { IconMic, IconMicOff, IconPhone, IconVideo, IconVideoOff, IconSettings } from './Icons';
 import AvatarStack from './AvatarStack';
 
 const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }) => {
@@ -60,10 +60,11 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
             <button
               type="button"
               onClick={() => navigate(`/servers/${selectedServer.id}/settings`)}
-              className="mt-2 rounded-lg border border-slate-800/70 bg-slate-900/50 px-2 py-1 text-xs text-slate-400 transition hover:border-slate-700 hover:text-slate-300"
+              className="mt-2 rounded-lg border border-slate-800/70 bg-slate-900/50 px-2 py-1 text-slate-400 transition hover:border-slate-700 hover:text-slate-300"
               title="Server Settings"
+              aria-label="Server Settings"
             >
-              ⚙
+              <IconSettings className="h-4 w-4" />
             </button>
           )}
         </div>
