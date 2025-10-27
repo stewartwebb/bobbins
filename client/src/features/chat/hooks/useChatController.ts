@@ -12,6 +12,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { authAPI, buildWebSocketURL, channelsAPI, serversAPI, uploadsAPI } from '../../../services/api';
+import { notificationSounds } from '../../../services/notificationSounds';
 import type {
   Channel,
   Message,
@@ -1014,6 +1015,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
     setMediaPermissionError(null);
     updateLocalMediaState({ mic: nextMicState }, { broadcast: true });
+    
+    // Play mute/unmute notification sound
+    notificationSounds.play(nextMicState === 'on' ? 'unmute' : 'mute');
   }, [ensureLocalMedia, updateLocalMediaState]);
 
   const handleToggleCamera = useCallback(async () => {
@@ -1544,6 +1548,11 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             const selfId = currentUserIdRef.current;
             if (selfId && selfId !== userId) {
               void getOrCreatePeerConnection(userId);
+              
+              // Play join sound only when someone else joins (not on updates)
+              if (payload.type === 'participant.joined') {
+                notificationSounds.play('join_channel');
+              }
             }
             return;
           }
@@ -1598,6 +1607,12 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               webrtcSessionRef.current = null;
               teardownWebRTCSession();
               setWebrtcError((current) => current ?? 'You left the audio channel.');
+            } else {
+              // Play leave sound when someone else leaves
+              const selfId = currentUserIdRef.current;
+              if (selfId && selfId !== userId) {
+                notificationSounds.play('leave_channel');
+              }
             }
             return;
           }
@@ -1650,6 +1665,12 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                 setUnreadMessageCount(0);
               } else {
                 setUnreadMessageCount((count) => count + 1);
+              }
+              
+              // Play notification sound for messages from other users
+              const currentUserId = currentUserIdRef.current;
+              if (currentUserId && message.user_id !== currentUserId) {
+                notificationSounds.play('message');
               }
             }
 
