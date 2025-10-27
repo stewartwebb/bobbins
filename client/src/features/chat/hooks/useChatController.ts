@@ -10,6 +10,7 @@ import type {
   DragEvent as ReactDragEvent,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
 } from 'react';
 import { authAPI, buildWebSocketURL, channelsAPI, serversAPI, uploadsAPI } from '../../../services/api';
 import { notificationSounds } from '../../../services/notificationSounds';
@@ -242,6 +243,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   // Timer ref used to debounce the initial programmatic scroll when switching
   // channels so we don't immediately trigger older-message loads.
   const initialScrollTimerRef = useRef<number | null>(null);
+  // Track forced scroll loops scheduled via requestAnimationFrame / setTimeout
+  // so we can cancel them when switching channels rapidly.
+  const forcedScrollTimeoutRef = useRef<number | null>(null);
+  const forcedScrollRafRef = useRef<number | null>(null);
   const currentUserIdRef = useRef<number | null>(null);
   const typingCleanupTimerRef = useRef<number | null>(null);
   const typingCooldownRef = useRef(0);
@@ -325,32 +330,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     previousChannelIdRef.current = nextId;
   }, [selectedChannel?.id]);
 
-  // When switching channels we want to suppress immediate "load older messages"
-  // triggers and ensure we pin to the bottom until content settles. This avoids
-  // the situation where the container starts at scrollTop=0 and fires a
-  // fetchOlderMessages before our auto-scroll runs.
-  useEffect(() => {
-    suppressFetchOlderRef.current = true;
-    forceScrollToBottomRef.current = true;
-
-    if (initialScrollTimerRef.current !== null) {
-      window.clearTimeout(initialScrollTimerRef.current);
-    }
-
-    // Allow programmatic scrolling and content settling to complete before
-    // enabling the top-of-list lazy-load again.
-    initialScrollTimerRef.current = window.setTimeout(() => {
-      suppressFetchOlderRef.current = false;
-      initialScrollTimerRef.current = null;
-    }, 800);
-
-    return () => {
-      if (initialScrollTimerRef.current !== null) {
-        window.clearTimeout(initialScrollTimerRef.current);
-        initialScrollTimerRef.current = null;
-      }
-    };
-  }, [selectedChannel?.id]);
+  
 
   useEffect(() => {
     let isMounted = true;
@@ -446,6 +426,109 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
     }
   }, []);
+
+  const clearForcedScrollLoops = useCallback(() => {
+    if (forcedScrollTimeoutRef.current !== null) {
+      window.clearTimeout(forcedScrollTimeoutRef.current);
+      forcedScrollTimeoutRef.current = null;
+    }
+
+    if (forcedScrollRafRef.current !== null) {
+      window.cancelAnimationFrame(forcedScrollRafRef.current);
+      forcedScrollRafRef.current = null;
+    }
+  }, []);
+
+  const handleJumpToBottom = useCallback(
+    (forceOrEvent: boolean | ReactMouseEvent<HTMLButtonElement> = false) => {
+      const container = messageListRef.current;
+      const isForced = forceOrEvent === true;
+      const willScroll = setAutoScrollOnNextRender(isForced);
+      setUnreadMessageCount(0);
+
+      if (container) {
+        if (isForced) {
+          // Immediate hard jump when forcing (channel switch) to avoid
+          // intermediate layout changes causing the viewport to land mid-list.
+          container.scrollTop = container.scrollHeight;
+          // keep forcing until ResizeObserver settles
+          forceScrollToBottomRef.current = true;
+        } else {
+          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        }
+      }
+
+      if (!willScroll) {
+        forceScrollToBottomRef.current = true;
+      }
+    },
+    [setAutoScrollOnNextRender]
+  );
+
+  const jumpToBottomWithRetries = useCallback(
+    (attempts = 8, intervalMs = 120) => {
+      clearForcedScrollLoops();
+
+      let remaining = Math.max(1, attempts);
+
+      const scheduleNext = () => {
+        forcedScrollRafRef.current = window.requestAnimationFrame(() => {
+          forcedScrollRafRef.current = null;
+          forceScrollToBottomRef.current = true;
+          handleJumpToBottom(true);
+
+          remaining -= 1;
+          if (remaining > 0) {
+            forcedScrollTimeoutRef.current = window.setTimeout(() => {
+              forcedScrollTimeoutRef.current = null;
+              scheduleNext();
+            }, intervalMs);
+          }
+        });
+      };
+
+      scheduleNext();
+    },
+    [clearForcedScrollLoops, handleJumpToBottom]
+  );
+
+  useEffect(
+    () => () => {
+      clearForcedScrollLoops();
+    },
+    [clearForcedScrollLoops]
+  );
+
+  // When switching channels we want to suppress immediate "load older messages"
+  // triggers and ensure we pin to the bottom until content settles. This avoids
+  // the situation where the container starts at scrollTop=0 and fires a
+  // fetchOlderMessages before our auto-scroll runs.
+  useEffect(() => {
+    suppressFetchOlderRef.current = true;
+    forceScrollToBottomRef.current = true;
+
+    if (initialScrollTimerRef.current !== null) {
+      window.clearTimeout(initialScrollTimerRef.current);
+    }
+
+    // Allow programmatic scrolling and content settling to complete before
+    // enabling the top-of-list lazy-load again.
+    initialScrollTimerRef.current = window.setTimeout(() => {
+      suppressFetchOlderRef.current = false;
+      initialScrollTimerRef.current = null;
+    }, 800);
+
+    // Immediately attempt to jump to the bottom when switching channels so
+    // the UI is always pinned to the most recent messages.
+    jumpToBottomWithRetries();
+
+    return () => {
+      if (initialScrollTimerRef.current !== null) {
+        window.clearTimeout(initialScrollTimerRef.current);
+        initialScrollTimerRef.current = null;
+      }
+    };
+  }, [selectedChannel?.id, jumpToBottomWithRetries]);
 
   const pruneTypingIndicators = useCallback(() => {
     setTypingByChannel((previous) => {
@@ -1496,6 +1579,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           setUnreadMessageCount(0);
         }
         setMessages(fetchedMessages);
+
+  // Ensure we jump to bottom on initial load (e.g. right after login) and
+  // retry across a few frames so slow-loading media cannot pull us upward.
+  jumpToBottomWithRetries(10, 150);
       } catch (err) {
         if (isMounted) {
           setMessages([]);
@@ -1516,7 +1603,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     return () => {
       isMounted = false;
     };
-  }, [selectedChannel, setAutoScrollOnNextRender]);
+  }, [selectedChannel, setAutoScrollOnNextRender, jumpToBottomWithRetries]);
 
   useEffect(() => {
     const token = localStorage.getItem('authToken');
@@ -2596,21 +2683,6 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     setWsStatus('connecting');
     setWsRetryCount((count) => count + 1);
   }, [clearRetryTimeout, wsStatus]);
-
-  const handleJumpToBottom = useCallback(() => {
-    const container = messageListRef.current;
-    const willScroll = setAutoScrollOnNextRender(true);
-    setUnreadMessageCount(0);
-
-    if (container) {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-    }
-
-    if (!willScroll) {
-      forceScrollToBottomRef.current = true;
-    }
-  }, [setAutoScrollOnNextRender]);
-
   const fetchOlderMessages = useCallback(async () => {
     if (!selectedChannel || selectedChannel.type !== 'text') {
       return;
@@ -3016,7 +3088,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     }
 
     const handleMediaLoad = () => {
-      window.requestAnimationFrame(() => ensurePinnedToBottom());
+      forceScrollToBottomRef.current = true;
+      jumpToBottomWithRetries(8, 140);
     };
 
     container.addEventListener('load', handleMediaLoad, true);
@@ -3024,7 +3097,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     return () => {
       container.removeEventListener('load', handleMediaLoad, true);
     };
-  }, [ensurePinnedToBottom]);
+  }, [ensurePinnedToBottom, jumpToBottomWithRetries]);
 
   const webrtcStatusLabel = useMemo(() => {
     if (!webrtcState) {
