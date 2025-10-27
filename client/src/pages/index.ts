@@ -7,3 +7,4 @@ export { default as InvitePage } from './InvitePage';
 export { default as LogoutPage } from './LogoutPage';
 export { default as NotFoundPage } from './NotFoundPage';
 export { UserSettingsPage } from './UserSettingsPage';
+export { ServerSettingsPage } from './ServerSettingsPage';

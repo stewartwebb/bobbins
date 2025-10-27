@@ -48,11 +48,25 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
   return (
     <aside className="hidden w-64 flex-shrink-0 border-r border-slate-800/70 bg-slate-950/75 px-4 py-6 md:flex md:flex-col">
       <header className="mb-6">
-        <p className="text-[11px] uppercase tracking-[0.35em] text-slate-500">Workspace</p>
-        <h2 className="mt-2 text-lg font-semibold text-white">{selectedServer?.name ?? 'Workspace'}</h2>
-        <p className="mt-1 font-mono text-[11px] text-slate-500">
-          bafa@chat://{selectedChannel?.name ?? 'welcome'}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1">
+            <p className="text-[11px] uppercase tracking-[0.35em] text-slate-500">Workspace</p>
+            <h2 className="mt-2 text-lg font-semibold text-white">{selectedServer?.name ?? 'Workspace'}</h2>
+            <p className="mt-1 font-mono text-[11px] text-slate-500">
+              bafa@chat://{selectedChannel?.name ?? 'welcome'}
+            </p>
+          </div>
+          {selectedServer && selectedServer.current_member_role === 'owner' && (
+            <button
+              type="button"
+              onClick={() => navigate(`/servers/${selectedServer.id}/settings`)}
+              className="mt-2 rounded-lg border border-slate-800/70 bg-slate-900/50 px-2 py-1 text-xs text-slate-400 transition hover:border-slate-700 hover:text-slate-300"
+              title="Server Settings"
+            >
+              ⚙
+            </button>
+          )}
+        </div>
       </header>
 
       <nav className="flex-1 space-y-1">

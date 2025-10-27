@@ -10,6 +10,7 @@ import {
   LogoutPage,
   NotFoundPage,
   UserSettingsPage,
+  ServerSettingsPage,
 } from './pages';
 
 const App: React.FC = () => {
@@ -22,6 +23,7 @@ const App: React.FC = () => {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/settings" element={<UserSettingsPage />} />
+          <Route path="/servers/:serverId/settings" element={<ServerSettingsPage />} />
           <Route path="/create-server" element={<CreateServerPage />} />
           <Route path="/invite/:code" element={<InvitePage />} />
           <Route path="/logout" element={<LogoutPage />} />
