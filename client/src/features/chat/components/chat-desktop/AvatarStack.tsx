@@ -1,18 +1,15 @@
 import React from 'react';
 import type { WebRTCParticipant } from '../../../../types';
+import { IconMic, IconMicOff } from './Icons';
 
 interface AvatarStackProps {
   participants: WebRTCParticipant[];
-  maxVisible?: number;
 }
 
-const AvatarStack: React.FC<AvatarStackProps> = ({ participants, maxVisible = 5 }) => {
+const AvatarStack: React.FC<AvatarStackProps> = ({ participants }) => {
   if (!participants || participants.length === 0) {
     return null;
   }
-
-  const visibleParticipants = participants.slice(0, maxVisible);
-  const remainingCount = Math.max(0, participants.length - maxVisible);
 
   const getInitials = (name: string): string => {
     const trimmed = name.trim();
@@ -26,41 +23,41 @@ const AvatarStack: React.FC<AvatarStackProps> = ({ participants, maxVisible = 5 
     return trimmed.slice(0, 2).toUpperCase();
   };
 
+  const getDisplayName = (participant: WebRTCParticipant): string => {
+    return participant.display_name || participant.username || 'Unknown User';
+  };
+
   return (
-    <div className="flex items-center gap-1 px-3 py-1">
-      <div className="flex -space-x-2">
-        {visibleParticipants.map((participant, index) => (
+    <div className="mt-1 space-y-1 px-3 pb-2">
+      {participants.map((participant) => {
+        const displayName = getDisplayName(participant);
+        const micOn = participant.media_state?.mic === 'on';
+        const participantKey = participant.session_id ?? `${participant.channel_id ?? 'channel'}-${participant.user_id}`;
+        return (
           <div
-            key={participant.user_id}
-            className="relative"
-            style={{ zIndex: visibleParticipants.length - index }}
-            title={participant.username || participant.display_name}
+            key={participantKey}
+            className="flex items-center justify-between rounded-md bg-slate-900/60 px-2 py-1 text-sm text-slate-200"
           >
-            {participant.avatar ? (
-              <img
-                src={participant.avatar}
-                alt={participant.username || participant.display_name}
-                className="h-6 w-6 rounded-full border-2 border-slate-950 bg-slate-800 object-cover"
-              />
-            ) : (
-              <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-slate-950 bg-emerald-600 text-[9px] font-semibold text-white">
-                {getInitials(participant.username || participant.display_name)}
-              </div>
-            )}
+            <div className="flex min-w-0 items-center gap-2">
+              {participant.avatar ? (
+                <img
+                  src={participant.avatar}
+                  alt={displayName}
+                  className="h-7 w-7 flex-shrink-0 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">
+                  {getInitials(displayName)}
+                </div>
+              )}
+              <span className="truncate">{displayName}</span>
+            </div>
+            <span className={`flex-shrink-0 ${micOn ? 'text-emerald-300' : 'text-slate-500'}`} aria-label={micOn ? 'Microphone on' : 'Microphone muted'}>
+              {micOn ? <IconMic className="h-4 w-4" /> : <IconMicOff className="h-4 w-4" />}
+            </span>
           </div>
-        ))}
-        {remainingCount > 0 && (
-          <div
-            className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-slate-950 bg-slate-700 text-[9px] font-semibold text-slate-300"
-            title={`${remainingCount} more participant${remainingCount > 1 ? 's' : ''}`}
-          >
-            +{remainingCount}
-          </div>
-        )}
-      </div>
-      <span className="ml-1 text-[10px] text-emerald-300/70">
-        {participants.length} {participants.length === 1 ? 'user' : 'users'}
-      </span>
+        );
+      })}
     </div>
   );
 };

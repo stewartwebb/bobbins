@@ -127,7 +127,7 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
                     </span>
                   )}
                 </button>
-                {hasParticipants && <AvatarStack participants={participants} maxVisible={5} />}
+                {hasParticipants && <AvatarStack participants={participants} />}
               </div>
             );
           })}
