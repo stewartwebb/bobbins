@@ -760,6 +760,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               updateLocalMediaState({ camera: 'off' }, { broadcast: true });
             };
           });
+
+          // Update local media state to reflect actual track states
+          updateLocalMediaState({ mic: 'on', camera: wantsVideo ? 'on' : 'off' }, { broadcast: true });
         } else if (wantsVideo && stream.getVideoTracks().length === 0) {
           const additionalStream = await navigator.mediaDevices.getUserMedia({
             video: {
@@ -790,6 +793,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                 connection.addTrack(videoTrack, stream as MediaStream);
               }
             });
+
+            // Update local media state to reflect camera is now on
+            updateLocalMediaState({ camera: 'on' }, { broadcast: true });
           }
         }
 
