@@ -2464,7 +2464,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         return;
       }
 
-      // Check if clipboard contains files (images)
+      // Check if clipboard contains files
       const items = clipboardData.items;
       const files: File[] = [];
 
