@@ -3100,10 +3100,6 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
     try {
       setIsSendingMessage(true);
-      await channelsAPI.createMessage(selectedChannel.id, {
-        content: trimmed,
-        type: "text",
-      });
 
       // If we have pending files, upload them first
       if (hasPendingFiles) {
