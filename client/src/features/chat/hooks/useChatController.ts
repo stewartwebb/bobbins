@@ -792,6 +792,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                 connection.addTrack(videoTrack, stream as MediaStream);
               }
             });
+
+            // Update local media state to reflect camera is now on
+            updateLocalMediaState({ camera: 'on' }, { broadcast: true });
           }
         }
 
