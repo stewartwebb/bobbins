@@ -276,6 +276,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const localMediaStateRef = useRef<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
   const remoteAudioElementsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
   const selfLeaveSoundPlayedRef = useRef(false);
+  const pendingFilesRef = useRef<PendingFile[]>([]);
 
   const normalizeChannelList = useCallback(
     (list: Channel[]) =>
@@ -313,6 +314,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   useEffect(() => {
     currentUserIdRef.current = currentUser?.id ?? null;
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    pendingFilesRef.current = pendingFiles;
+  }, [pendingFiles]);
 
   useEffect(() => {
     if (!canManageChannels && isCreateChannelOpen) {
@@ -2254,12 +2259,14 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     );
   }, [selectedChannel]);
 
-  useEffect(() => () => {
-    // Cleanup object URLs when component unmounts
-    pendingFiles.forEach((pending) => {
-      URL.revokeObjectURL(pending.previewUrl);
-    });
-  }, [pendingFiles]);
+  useEffect(() => {
+    // Cleanup function to run on unmount
+    return () => {
+      pendingFilesRef.current.forEach((pending) => {
+        URL.revokeObjectURL(pending.previewUrl);
+      });
+    };
+  }, []);
 
   useEffect(() => () => {
     if (retryTimeoutRef.current !== null) {
@@ -2274,7 +2281,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   useEffect(() => {
     if (!selectedChannel || selectedChannel.type !== 'text') {
       // Clear pending files when switching channels
-      pendingFiles.forEach((pending) => {
+      const currentPendingFiles = pendingFilesRef.current;
+      currentPendingFiles.forEach((pending) => {
         URL.revokeObjectURL(pending.previewUrl);
       });
       setPendingFiles([]);
