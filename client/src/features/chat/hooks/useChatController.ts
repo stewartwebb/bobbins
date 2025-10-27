@@ -55,6 +55,12 @@ type UploadTracker = {
   error?: string;
 };
 
+type PendingFile = {
+  id: string;
+  file: File;
+  previewUrl: string;
+};
+
 type TypingEntry = {
   id: number;
   name: string;
@@ -197,6 +203,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const [wsStatus, setWsStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [wsRetryCount, setWsRetryCount] = useState(0);
   const [uploadQueue, setUploadQueue] = useState<UploadTracker[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const [previewAttachment, setPreviewAttachment] = useState<MessageAttachment | null>(null);
   const [composerMaxHeight, setComposerMaxHeight] = useState(240);
@@ -2248,6 +2255,13 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   }, [selectedChannel]);
 
   useEffect(() => () => {
+    // Cleanup object URLs when component unmounts
+    pendingFiles.forEach((pending) => {
+      URL.revokeObjectURL(pending.previewUrl);
+    });
+  }, [pendingFiles]);
+
+  useEffect(() => () => {
     if (retryTimeoutRef.current !== null) {
       window.clearTimeout(retryTimeoutRef.current);
     }
@@ -2259,10 +2273,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
   useEffect(() => {
     if (!selectedChannel || selectedChannel.type !== 'text') {
+      // Clear pending files when switching channels
+      pendingFiles.forEach((pending) => {
+        URL.revokeObjectURL(pending.previewUrl);
+      });
+      setPendingFiles([]);
       return;
     }
     messageInputRef.current?.focus();
-  }, [selectedChannel]);
+  }, [selectedChannel, pendingFiles]);
 
   useEffect(() => {
     if (!previewAttachment) {
@@ -2498,9 +2517,29 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       event.preventDefault();
       dragCounterRef.current = 0;
       setIsDragActive(false);
-      processFiles(event.dataTransfer?.files ?? null);
+      
+      if (!selectedChannel || selectedChannel.type !== 'text') {
+        return;
+      }
+
+      const files = event.dataTransfer?.files;
+      if (!files || files.length === 0) {
+        return;
+      }
+
+      // Add dropped files to pending state instead of immediately uploading
+      const newPendingFiles: PendingFile[] = [];
+      Array.from(files).forEach((file) => {
+        const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const previewUrl = URL.createObjectURL(file);
+        newPendingFiles.push({ id, file, previewUrl });
+      });
+
+      setPendingFiles((prev) => [...prev, ...newPendingFiles]);
     },
-    [processFiles]
+    [selectedChannel]
   );
 
   const handlePaste = useCallback(
@@ -2528,14 +2567,23 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         }
       }
 
-      // If files were found, process them and prevent default paste behavior
+      // If files were found, add them to pending state and prevent default paste behavior
       if (files.length > 0) {
         event.preventDefault();
-        processFiles(files);
+        const newPendingFiles: PendingFile[] = [];
+        files.forEach((file) => {
+          const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          const previewUrl = URL.createObjectURL(file);
+          newPendingFiles.push({ id, file, previewUrl });
+        });
+
+        setPendingFiles((prev) => [...prev, ...newPendingFiles]);
       }
       // If no files, allow normal paste behavior (text)
     },
-    [selectedChannel, processFiles]
+    [selectedChannel]
   );
 
   const sendMessage = useCallback(async () => {
@@ -2548,7 +2596,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     }
 
     const trimmed = messageInput.trim();
-    if (!trimmed) {
+    const hasPendingFiles = pendingFiles.length > 0;
+    
+    // If no text and no pending files, just stop typing and return
+    if (!trimmed && !hasPendingFiles) {
       stopTyping();
       return;
     }
@@ -2557,32 +2608,169 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
     try {
       setIsSendingMessage(true);
-      const response = await channelsAPI.createMessage(selectedChannel.id, {
-        content: trimmed,
-        type: 'text',
-      });
-      const newMessage = response.data.message;
 
-      const willScroll = setAutoScrollOnNextRender();
-      let inserted = false;
-      setMessages((previous) => {
-        if (previous.some((existing) => existing.id === newMessage.id)) {
-          return previous;
-        }
-        inserted = true;
-        return [...previous, newMessage];
-      });
+      // If we have pending files, upload them first
+      if (hasPendingFiles) {
+        const filesToUpload = [...pendingFiles];
+        
+        // Clear pending files immediately so user can continue
+        setPendingFiles([]);
+        
+        // Clean up object URLs
+        filesToUpload.forEach((pending) => {
+          URL.revokeObjectURL(pending.previewUrl);
+        });
 
-      if (inserted) {
-        setMessagesCursor((current) => current ?? newMessage.created_at);
-        if (willScroll) {
-          setUnreadMessageCount(0);
-        } else {
-          setUnreadMessageCount((count) => count + 1);
+        // Upload files using processFiles
+        for (const pending of filesToUpload) {
+          const trackerId = pending.id;
+
+          setUploadQueue((prev) => [...prev, { id: trackerId, name: pending.file.name, status: 'uploading' }]);
+
+          const contentType = pending.file.type || 'application/octet-stream';
+          const channelId = selectedChannel.id;
+          let createdMessage: Message | null = null;
+
+          if (!skipDirectUploadRef.current) {
+            try {
+              const signature = await uploadsAPI.createPresignedUpload(channelId, {
+                file_name: pending.file.name,
+                content_type: contentType,
+                file_size: pending.file.size,
+              });
+
+              const headers = new Headers();
+              const signedHeaders = signature.headers ?? {};
+              Object.entries(signedHeaders).forEach(([key, value]) => {
+                const normalized = key.toLowerCase();
+                if (normalized === 'host' || normalized === 'content-length') {
+                  return;
+                }
+                if (typeof value === 'string' && value.trim().length > 0) {
+                  headers.set(key, value);
+                }
+              });
+
+              if (!headers.has('Content-Type')) {
+                headers.set('Content-Type', contentType);
+              }
+
+              const uploadResponse = await fetch(signature.upload_url, {
+                method: signature.method || 'PUT',
+                headers,
+                body: pending.file,
+                mode: 'cors',
+                cache: 'no-store',
+                keepalive: true,
+              });
+
+              if (!uploadResponse.ok) {
+                throw new Error(`Upload failed with status ${uploadResponse.status}`);
+              }
+
+              const payload = {
+                content: trimmed || '',
+                type: 'file' as const,
+                attachments: [
+                  {
+                    object_key: signature.object_key,
+                    url: signature.file_url,
+                    file_name: pending.file.name,
+                    content_type: contentType,
+                    file_size: pending.file.size,
+                  },
+                ],
+              };
+
+              const response = await channelsAPI.createMessage(channelId, payload);
+              createdMessage = response.data.message;
+            } catch (uploadError) {
+              console.error('Direct upload failed, switching to fallback upload', uploadError);
+              skipDirectUploadRef.current = true;
+            }
+          }
+
+          if (!createdMessage) {
+            try {
+              const fallbackResponse = await uploadsAPI.uploadAttachmentMessage(channelId, pending.file);
+              createdMessage = fallbackResponse.data.message;
+            } catch (fallbackError) {
+              console.error('Fallback upload failed', fallbackError);
+              const message = fallbackError instanceof Error ? fallbackError.message : 'Failed to upload file';
+              setUploadQueue((prev) =>
+                prev.map((entry) =>
+                  entry.id === trackerId ? { ...entry, status: 'error', error: message } : entry
+                )
+              );
+              setError(message);
+              window.setTimeout(() => setError(''), 5000);
+              continue;
+            }
+          }
+
+          if (createdMessage) {
+            const messageToInsert = createdMessage;
+
+            const willScroll = setAutoScrollOnNextRender();
+            let inserted = false;
+            setMessages((previous) => {
+              if (previous.some((existing) => existing.id === messageToInsert.id)) {
+                return previous;
+              }
+              inserted = true;
+              return [...previous, messageToInsert];
+            });
+
+            if (inserted) {
+              setMessagesCursor((current) => current ?? messageToInsert.created_at);
+              if (willScroll) {
+                setUnreadMessageCount(0);
+              } else {
+                setUnreadMessageCount((count) => count + 1);
+              }
+            }
+
+            setUploadQueue((prev) =>
+              prev.map((entry) => (entry.id === trackerId ? { ...entry, status: 'success' } : entry))
+            );
+
+            window.setTimeout(() => {
+              setUploadQueue((prev) => prev.filter((entry) => entry.id !== trackerId));
+            }, 1800);
+          }
         }
+        
+        // Clear the message input
+        setMessageInput('');
+      } else if (trimmed) {
+        // No pending files, just send text message
+        const response = await channelsAPI.createMessage(selectedChannel.id, {
+          content: trimmed,
+          type: 'text',
+        });
+        const newMessage = response.data.message;
+
+        const willScroll = setAutoScrollOnNextRender();
+        let inserted = false;
+        setMessages((previous) => {
+          if (previous.some((existing) => existing.id === newMessage.id)) {
+            return previous;
+          }
+          inserted = true;
+          return [...previous, newMessage];
+        });
+
+        if (inserted) {
+          setMessagesCursor((current) => current ?? newMessage.created_at);
+          if (willScroll) {
+            setUnreadMessageCount(0);
+          } else {
+            setUnreadMessageCount((count) => count + 1);
+          }
+        }
+
+        setMessageInput('');
       }
-
-      setMessageInput('');
     } catch (err) {
       setError('Failed to send message. Please try again.');
       window.setTimeout(() => setError(''), 5000);
@@ -2595,6 +2783,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     selectedChannel,
     wsStatus,
     messageInput,
+    pendingFiles,
     setAutoScrollOnNextRender,
     stopTyping,
   ]);
@@ -2635,6 +2824,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const handleJoinServer = () => {
     setIsServerActionOpen(false);
   };
+
+  const handleRemovePendingFile = useCallback((fileId: string) => {
+    setPendingFiles((prev) => {
+      const fileToRemove = prev.find((f) => f.id === fileId);
+      if (fileToRemove) {
+        URL.revokeObjectURL(fileToRemove.previewUrl);
+      }
+      return prev.filter((f) => f.id !== fileId);
+    });
+  }, []);
 
   const formatTimestamp = useCallback((value: string) => {
     if (!value) {
@@ -3307,6 +3506,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         wsStatus,
         wsRetryCount,
         uploadQueue,
+        pendingFiles,
         isDragActive,
         previewAttachment,
         composerMaxHeight,
@@ -3375,6 +3575,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         handleDragLeave,
         handleDrop,
         handlePaste,
+        handleRemovePendingFile,
         handleManualReconnect,
         handleJumpToBottom,
         handleToggleMic,
