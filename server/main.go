@@ -147,6 +147,7 @@ func main() {
 		{
 			// User routes
 			protected.GET("/users/me", handlers.GetCurrentUser)
+			protected.POST("/users/lookup", handlers.LookupUsers)
 			protected.PUT("/users/me", handlers.UpdateCurrentUser)
 			protected.POST("/users/me/avatar/presign", handlers.PresignUserAvatarUpload)
 			protected.POST("/users/me/avatar", handlers.SetUserAvatar)

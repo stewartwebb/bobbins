@@ -579,10 +579,6 @@ func (h *Hub) broadcastToChannel(channelID uint, payload interface{}, excludeUse
 	h.mu.RUnlock()
 
 	for _, client := range clients {
-		if !client.webrtcActive || client.webrtcChannelID != channelID {
-			continue
-		}
-
 		if excludeUserID != 0 && client.userID == excludeUserID {
 			continue
 		}

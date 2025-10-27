@@ -9,6 +9,12 @@ export interface User {
   updated_at: string;
 }
 
+export interface UserSummary {
+  id: number;
+  username: string;
+  avatar?: string;
+}
+
 export interface Server {
   id: number;
   name: string;
@@ -16,7 +22,7 @@ export interface Server {
   icon?: string | null;
   owner_id: number;
   owner?: Partial<User> | null;
-  current_member_role?: 'owner' | 'member';
+  current_member_role?: "owner" | "member";
   channels?: Channel[];
   members?: User[];
   created_at: string;
@@ -27,7 +33,7 @@ export interface Channel {
   id: number;
   name: string;
   description?: string;
-  type: 'text' | 'audio';
+  type: "text" | "audio";
   server_id: number;
   server?: Server;
   messages?: Message[];
@@ -43,7 +49,7 @@ export interface Message {
   user?: Partial<User> | null;
   channel_id: number;
   channel?: Channel;
-  type: 'text' | 'image' | 'file';
+  type: "text" | "image" | "file";
   edited_at?: string;
   created_at: string;
   updated_at: string;
@@ -152,7 +158,7 @@ export interface AcceptInviteResponse {
 export interface CreateChannelRequest {
   name: string;
   description?: string;
-  type: 'text' | 'audio';
+  type: "text" | "audio";
   server_id: number;
   position?: number;
 }
@@ -166,7 +172,7 @@ export interface CreateChannelResponse {
 
 export interface CreateMessageRequest {
   content: string;
-  type?: 'text' | 'file';
+  type?: "text" | "file";
   attachments?: MessageAttachmentInput[];
 }
 
