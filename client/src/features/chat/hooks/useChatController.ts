@@ -255,6 +255,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const remoteStreamsRef = useRef<Map<number, MediaStream>>(new Map());
   const pendingCandidatesRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
   const remoteMediaElementsRef = useRef<Map<number, HTMLVideoElement>>(new Map());
+  const pendingPeerConnectionIdsRef = useRef<Set<number>>(new Set());
   const makingOfferRef = useRef<Map<number, boolean>>(new Map());
   const ignoreOfferRef = useRef<Map<number, boolean>>(new Map());
   const settingRemoteAnswerRef = useRef<Map<number, boolean>>(new Map());
@@ -569,6 +570,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     remoteAudioElementsRef.current.clear();
 
     setRemoteMediaStreams({});
+
+  pendingPeerConnectionIdsRef.current.clear();
 
     const localStream = localMediaStreamRef.current;
     if (localStream) {

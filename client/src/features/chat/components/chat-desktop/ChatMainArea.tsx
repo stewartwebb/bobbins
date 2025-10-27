@@ -290,12 +290,20 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
                                     if (activeStream && node.srcObject !== activeStream) {
                                       node.srcObject = activeStream;
                                     }
-                                    node.muted = false;
+                                    node.muted = true;
                                     node.playsInline = true;
+                                    node.setAttribute('playsinline', 'true');
+                                    node.setAttribute('webkit-playsinline', 'true');
+                                    if (activeStream) {
+                                      const playback = node.play();
+                                      if (playback && typeof playback.catch === 'function') {
+                                        void playback.catch(() => undefined);
+                                      }
+                                    }
                                   }
                                 }}
                                 autoPlay
-                                muted={isSelf}
+                                muted
                                 playsInline
                                 className="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
                                 style={{ opacity: cameraActive ? 1 : 0.05 }}

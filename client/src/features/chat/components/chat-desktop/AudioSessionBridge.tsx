@@ -3,24 +3,13 @@ import type { ChatController } from '../../hooks/useChatController';
 
 const AudioSessionBridge: React.FC<{ controller: ChatController }> = ({ controller }) => {
   const {
-    state: { selectedChannel, webrtcState, remoteMediaStreams },
+    state: { webrtcState, remoteMediaStreams },
     refs: { remoteAudioElementsRef },
   } = controller;
 
   const shouldRenderPlayers = useMemo(() => {
-    if (!webrtcState || webrtcState.status !== 'connected') {
-      return false;
-    }
-
-    if (!selectedChannel) {
-      return true;
-    }
-
-    const viewingActiveAudioChannel =
-      selectedChannel.type === 'audio' && selectedChannel.id === webrtcState.channelId;
-
-    return !viewingActiveAudioChannel;
-  }, [selectedChannel, webrtcState]);
+    return Boolean(webrtcState && webrtcState.status === 'connected');
+  }, [webrtcState]);
 
   const entries = useMemo(() => {
     if (!shouldRenderPlayers) {
