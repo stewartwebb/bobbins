@@ -16,6 +16,8 @@ import {
   usersAPI,
 } from "../../../services/api";
 import { notificationSounds } from "../../../services/notificationSounds";
+import { browserNotifications } from "../../../services/browserNotifications";
+import { titleNotifications } from "../../../services/titleNotifications";
 import type {
   Channel,
   Message,
@@ -265,6 +267,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const [channelParticipants, setChannelParticipants] = useState<
     Record<number, WebRTCParticipant[]>
   >({});
+  const [unreadByChannel, setUnreadByChannel] = useState<Record<number, number>>({});
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationsRequested, setNotificationsRequested] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const selectedServerIdRef = useRef<number | null>(null);
@@ -763,6 +768,41 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       isMounted = false;
     };
   }, [navigate]);
+
+  // Request notification permissions on mount
+  useEffect(() => {
+    if (!notificationsRequested && browserNotifications.isSupported()) {
+      setNotificationsRequested(true);
+      browserNotifications.requestPermission().then((permission) => {
+        setNotificationsEnabled(permission === "granted");
+      });
+    }
+  }, [notificationsRequested]);
+
+  // Update title with total unread count
+  useEffect(() => {
+    const totalUnread = Object.values(unreadByChannel).reduce((sum, count) => sum + count, 0);
+    titleNotifications.setUnreadCount(totalUnread);
+  }, [unreadByChannel]);
+
+  // Handle window focus to clear unread and stop title flashing
+  useEffect(() => {
+    const handleFocus = () => {
+      titleNotifications.stopFlashing();
+      if (selectedChannel?.id) {
+        setUnreadByChannel((prev) => {
+          const next = { ...prev };
+          delete next[selectedChannel.id];
+          return next;
+        });
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [selectedChannel?.id]);
 
   const clearRetryTimeout = useCallback(() => {
     if (retryTimeoutRef.current !== null) {
@@ -2394,9 +2434,20 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             if (selfId && selfId !== userId) {
               void getOrCreatePeerConnection(userId);
 
-              // Play join sound only when someone else joins (not on updates)
+              // Play join sound and show notification only when someone else joins (not on updates)
               if (payload.type === "participant.joined") {
                 notificationSounds.play("join_channel");
+                
+                // Show browser notification for call joins if window is not focused
+                if (!document.hasFocus() && notificationsEnabled) {
+                  const participant = webrtcState?.participants.find((p) => p.user_id === userId);
+                  const displayName = participant?.display_name || participant?.username || `Member #${userId}`;
+                  const channel = channels.find((c) => c.id === channelId);
+                  
+                  if (channel) {
+                    browserNotifications.showCallJoinNotification(displayName, channel.name);
+                  }
+                }
               }
             }
             return;
@@ -2522,6 +2573,44 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               }
               return next;
             });
+
+            // Handle notifications for messages not in the current channel
+            const isCurrentChannel = selectedChannelIdRef.current === channelId;
+            const isOwnMessage = currentUserIdRef.current === message.user_id;
+            const isWindowFocused = document.hasFocus();
+
+            if (!isOwnMessage && (!isCurrentChannel || !isWindowFocused)) {
+              // Get channel and server names for the notification
+              const channel = channels.find((c) => c.id === channelId);
+              const server = selectedServer;
+              const username = message.user?.username || "Someone";
+              const messageContent = message.content.length > 100
+                ? message.content.substring(0, 100) + "..."
+                : message.content;
+
+              // Show browser notification if window is not focused
+              if (!isWindowFocused && notificationsEnabled && channel && server) {
+                browserNotifications.showMessageNotification(
+                  username,
+                  messageContent,
+                  channel.name,
+                  server.name
+                );
+              }
+
+              // Update title with unread count
+              if (!isCurrentChannel) {
+                setUnreadByChannel((prev) => ({
+                  ...prev,
+                  [channelId]: (prev[channelId] || 0) + 1,
+                }));
+              }
+
+              // Flash title if window is not focused
+              if (!isWindowFocused) {
+                titleNotifications.startFlashing(`New message from ${username}`);
+              }
+            }
 
             if (selectedChannelIdRef.current !== channelId) {
               return;
@@ -2791,6 +2880,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     handleIncomingCandidate,
     teardownWebRTCSession,
     setAutoScrollOnNextRender,
+    channels,
+    notificationsEnabled,
+    selectedServer,
+    webrtcState,
   ]);
 
   useEffect(() => {
@@ -2916,6 +3009,17 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
   const handleChannelSelect = (channel: Channel) => {
     setSelectedChannel(channel);
+    
+    // Clear unread count for the selected channel
+    setUnreadByChannel((prev) => {
+      if (!prev[channel.id]) return prev;
+      const next = { ...prev };
+      delete next[channel.id];
+      return next;
+    });
+    
+    // Stop title flashing when selecting a channel
+    titleNotifications.stopFlashing();
   };
 
   const handleMessageChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -4091,6 +4195,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         remoteMediaStreams,
         mediaPermissionError,
         channelParticipants,
+        unreadByChannel,
+        notificationsEnabled,
       },
       derived: {
         canManageChannels,
@@ -4099,6 +4205,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         groupedMessages,
         audioParticipants,
         activeAudioChannel,
+        channelParticipants,
         previewAttachmentIsVideo,
         previewAttachmentIsImage,
         showJoinAudioButton,

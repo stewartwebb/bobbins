@@ -19,7 +19,7 @@ const ChannelSidebar: React.FC<ChannelSidebarProps> = ({ controller, onOpenUserS
       currentUser,
       localMediaState,
       webrtcState,
-      channelParticipants,
+      unreadByChannel,
     },
     derived: {
       canManageChannels,
@@ -28,6 +28,7 @@ const ChannelSidebar: React.FC<ChannelSidebarProps> = ({ controller, onOpenUserS
       webrtcStatusLabel,
       audioSessionInfoText,
       audioControlsDisabled,
+      channelParticipants,
     },
     actions: {
       handleChannelSelect,
@@ -103,6 +104,8 @@ const ChannelSidebar: React.FC<ChannelSidebarProps> = ({ controller, onOpenUserS
               webrtcState.status === 'connected';
             const participants = isAudioChannel ? (channelParticipants[channel.id] || []) : [];
             const hasParticipants = participants.length > 0;
+            const unreadCount = unreadByChannel[channel.id] || 0;
+            const hasUnread = unreadCount > 0 && !isActive;
 
             return (
               <div key={channel.id} className="flex flex-col">
@@ -115,9 +118,16 @@ const ChannelSidebar: React.FC<ChannelSidebarProps> = ({ controller, onOpenUserS
                       : 'text-slate-300 hover:bg-slate-900/70 hover:text-primary-100'
                   }`}
                 >
-                  <span className="flex items-center gap-2 font-mono text-sm">
-                    <span className={isAudioChannel ? 'text-emerald-300' : 'text-primary-300'}>{prefix}</span>
-                    {channel.name}
+                  <span className="flex items-center justify-between gap-2 font-mono text-sm">
+                    <span className="flex items-center gap-2">
+                      <span className={isAudioChannel ? 'text-emerald-300' : 'text-primary-300'}>{prefix}</span>
+                      {channel.name}
+                    </span>
+                    {hasUnread && (
+                      <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
                   </span>
                   {channel.description && (
                     <span className="text-[11px] text-slate-500">{channel.description}</span>
