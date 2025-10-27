@@ -240,7 +240,7 @@ APP_BASE_URL=http://localhost:3000
 
 ## 🚧 Current Status
 
-This is the basic project setup. The following features are **implemented as placeholders** and need full implementation:
+The core chat experience (authentication → messaging → audio) is implemented end-to-end. Here's the current breakdown:
 
 ### Backend (Go)
 - ✅ Basic server setup with Gin
@@ -248,23 +248,23 @@ This is the basic project setup. The following features are **implemented as pla
 - ✅ WebSocket hub implementation
 - ✅ CORS middleware
 - ✅ PostgreSQL connection with GORM auto-migrations
-- ✅ Postmark email client scaffolding
-- ⚠️ **TODO**: Repository layer and persistence logic
-- ⚠️ **TODO**: JWT authentication
-- ⚠️ **TODO**: Password hashing
-- ⚠️ **TODO**: Message persistence
-- ⚠️ **TODO**: User management
+- ✅ Postmark email client integration with task queue fallback
+- ✅ Repository & persistence logic via GORM models and transactions
+- ✅ JWT authentication middleware (`server/internal/auth/jwt.go` + `middleware/auth.go`)
+- ✅ Password hashing and verification helpers
+- ✅ Message persistence (text, file uploads, attachment previews, WebSocket broadcast)
+- ⚠️ User profile management still read-only (`UpdateCurrentUser` remains a stub)
 
 ### Frontend (React)
 - ✅ Basic React app with TypeScript
-- ✅ Login and Chat pages
-- ✅ API service structure
-- ✅ Basic UI components
-- ⚠️ **TODO**: Real-time WebSocket integration
-- ⚠️ **TODO**: State management (Context/Redux)
-- ⚠️ **TODO**: Complete authentication flow
-- ⚠️ **TODO**: Message persistence
-- ⚠️ **TODO**: Server/channel management UI
+- ✅ Login, Register, Verify Email, Chat, and Invite pages
+- ✅ API service layer (`client/src/services/api.ts`)
+- ✅ Rich UI components styled with Tailwind CSS
+- ✅ Real-time WebSocket integration through `useChatController`
+- ✅ Local state management via the controller hook (no external store required yet)
+- ✅ Complete authentication flow wired to backend JWT + email verification
+- ✅ Message history, uploads, and attachment previews
+- ✅ Server & channel management UI (desktop plus responsive mobile navigation)
 
 ## 🤝 Contributing
 
@@ -280,15 +280,15 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🔮 Roadmap
 
-- [ ] Database integration (PostgreSQL)
-- [ ] Complete authentication system
-- [ ] Message persistence and history
-- [ ] File upload and sharing
-- [ ] Voice channels
+- [x] Database integration (PostgreSQL via GORM)
+- [x] Complete authentication system (registration, email verification, JWT, auth middleware)
+- [x] Message persistence and history (paged fetch + WebSocket fan-out)
+- [x] File upload and sharing (S3-compatible storage, presigned uploads, fallback uploader)
+- [x] Voice channels (WebRTC audio rooms with mute/camera controls)
 - [ ] User presence indicators
-- [ ] Server permissions system
+- [ ] Server permissions system (beyond owner-only checks)
 - [ ] Push notifications
-- [ ] Mobile responsiveness
+- [ ] Mobile responsiveness improvements (additional polish & tablet testing)
 - [ ] Docker containerization
 - [ ] CI/CD pipeline
 
