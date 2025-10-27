@@ -14,6 +14,7 @@ import (
 	"bafachat/internal/middleware"
 	"bafachat/internal/queue"
 	"bafachat/internal/storage"
+	"bafachat/internal/turn"
 	"bafachat/internal/webrtc"
 	"bafachat/internal/websocket"
 
@@ -72,9 +73,30 @@ func main() {
 	hub := websocket.NewHub()
 	go hub.Run()
 
+	// Initialize TURN server
+	turnConfig := turn.ConfigFromEnv()
+	var turnServer *turn.Server
+	if turnConfig.Enabled {
+		ts, terr := turn.NewServer(turnConfig)
+		if terr != nil {
+			log.Printf("TURN server failed to start: %v", terr)
+		} else {
+			turnServer = ts
+			log.Printf("TURN server started on UDP port %d", turnConfig.Port)
+		}
+	} else {
+		log.Println("TURN server disabled (set TURN_ENABLED=true to enable)")
+	}
+
 	// Initialize WebRTC signaling manager and config
 	rtcManager := webrtc.NewManager(2 * time.Minute)
 	rtcConfig := webrtc.ConfigFromEnv()
+	
+	// Add TURN server to WebRTC config if available
+	if turnServer != nil {
+		rtcConfig = webrtc.ConfigWithTURN(rtcConfig, turnConfig)
+	}
+	
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()

@@ -1,10 +1,12 @@
 package webrtc
 
 import (
-    "encoding/json"
-    "log"
-    "os"
-    "strings"
+	"encoding/json"
+	"log"
+	"os"
+	"strings"
+
+	"bafachat/internal/turn"
 )
 
 // ICEServer mirrors the WebRTC RTCIceServer configuration.
@@ -52,4 +54,17 @@ func ConfigFromEnv() Config {
     }
 
     return Config{ICEServers: servers}
+}
+
+// ConfigWithTURN adds the TURN server configuration to the existing config.
+func ConfigWithTURN(config Config, turnConfig turn.Config) Config {
+    // Add TURN server to the ICE servers list
+    turnICEServer := ICEServer{
+        URLs:       []string{turnConfig.GetTURNURL()},
+        Username:   turnConfig.Username,
+        Credential: turnConfig.Password,
+    }
+    
+    config.ICEServers = append(config.ICEServers, turnICEServer)
+    return config
 }
