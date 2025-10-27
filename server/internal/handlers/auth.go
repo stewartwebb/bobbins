@@ -268,10 +268,8 @@ func isEmailFormat(identifier string) bool {
 	// Check domain part has a dot and doesn't start or end with a dot
 	afterAt := identifier[atIndex+1:]
 	dotIndex := strings.Index(afterAt, ".")
-	if dotIndex < 0 || dotIndex == 0 || dotIndex == len(afterAt)-1 {
-		return false
-	}
-	return true
+	// Dot must exist (>= 0), not at start (> 0), and not at end (< len-1)
+	return dotIndex > 0 && dotIndex < len(afterAt)-1
 }
 
 func ensureUniqueUser(db *gorm.DB, username, email string) error {
