@@ -1,28 +1,30 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeEvent,
   DragEvent as ReactDragEvent,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
-} from 'react';
-import { authAPI, buildWebSocketURL, channelsAPI, serversAPI, uploadsAPI } from '../../../services/api';
-import { notificationSounds } from '../../../services/notificationSounds';
+} from "react";
+import {
+  authAPI,
+  buildWebSocketURL,
+  channelsAPI,
+  serversAPI,
+  uploadsAPI,
+  usersAPI,
+} from "../../../services/api";
+import { notificationSounds } from "../../../services/notificationSounds";
 import type {
   Channel,
   Message,
   MessageAttachment,
   Server,
   User,
+  UserSummary,
   WebRTCParticipant,
   WebRTCMediaState,
-} from '../../../types';
+} from "../../../types";
 
 type WebSocketEnvelope = {
   type: string;
@@ -45,7 +47,7 @@ type WebSocketEnvelope = {
 
 export type ChatController = ReturnType<typeof useChatController>;
 
-type UploadStatus = 'uploading' | 'success' | 'error';
+type UploadStatus = "uploading" | "success" | "error";
 
 type UploadTracker = {
   id: string;
@@ -60,7 +62,7 @@ type TypingEntry = {
   expiresAt: number;
 };
 
-type WebRTCSessionStatus = 'authenticating' | 'connected' | 'error';
+type WebRTCSessionStatus = "authenticating" | "connected" | "error";
 
 type WebRTCSessionState = {
   channelId: number;
@@ -75,57 +77,69 @@ type WebRTCSessionState = {
 };
 
 const DEFAULT_MEDIA_STATE: WebRTCMediaState = {
-  mic: 'off',
-  camera: 'off',
-  screen: 'off',
+  mic: "off",
+  camera: "off",
+  screen: "off",
 };
 
 type UseChatControllerOptions = {
   navigate?: (path: string) => void;
 };
 
-
 const MESSAGE_PAGE_SIZE = 50;
 const TYPING_THROTTLE_MS = 2500;
 const TYPING_PRUNE_INTERVAL_MS = 4000;
 const TYPING_EVENT_FALLBACK_MS = 7500;
+const USER_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type CachedUserProfile = {
+  username?: string;
+  avatar?: string;
+  fetchedAt: number;
+};
 
 const mergeMediaState = (
   base?: WebRTCMediaState | null,
-  incoming?: WebRTCMediaState | null
+  incoming?: WebRTCMediaState | null,
 ): WebRTCMediaState => ({
   mic: incoming?.mic ?? base?.mic ?? DEFAULT_MEDIA_STATE.mic,
   camera: incoming?.camera ?? base?.camera ?? DEFAULT_MEDIA_STATE.camera,
   screen: incoming?.screen ?? base?.screen ?? DEFAULT_MEDIA_STATE.screen,
 });
 
-const normalizeParticipantRoster = (roster: WebRTCParticipant[]): WebRTCParticipant[] => {
+const normalizeParticipantRoster = (
+  roster: WebRTCParticipant[],
+): WebRTCParticipant[] => {
   const byId = new Map<number, WebRTCParticipant>();
 
   roster.forEach((participant) => {
-    if (typeof participant.user_id !== 'number') {
+    if (typeof participant.user_id !== "number") {
       return;
     }
 
     const existing = byId.get(participant.user_id);
     const displayName =
-      typeof participant.display_name === 'string' && participant.display_name.trim().length > 0
+      typeof participant.display_name === "string" &&
+      participant.display_name.trim().length > 0
         ? participant.display_name
-        : existing?.display_name ?? `Member #${participant.user_id}`;
+        : (existing?.display_name ?? `Member #${participant.user_id}`);
 
     const merged: WebRTCParticipant = {
       ...existing,
       ...participant,
       display_name: displayName,
-      media_state: mergeMediaState(existing?.media_state, participant.media_state),
+      media_state: mergeMediaState(
+        existing?.media_state,
+        participant.media_state,
+      ),
     };
 
     byId.set(participant.user_id, merged);
   });
 
   return Array.from(byId.values()).sort((a, b) => {
-    const nameA = (a.display_name || '').toLowerCase();
-    const nameB = (b.display_name || '').toLowerCase();
+    const nameA = (a.display_name || "").toLowerCase();
+    const nameB = (b.display_name || "").toLowerCase();
     const comparison = nameA.localeCompare(nameB);
     if (comparison !== 0) {
       return comparison;
@@ -134,20 +148,28 @@ const normalizeParticipantRoster = (roster: WebRTCParticipant[]): WebRTCParticip
   });
 };
 
-const upsertParticipant = (participants: WebRTCParticipant[], next: WebRTCParticipant): WebRTCParticipant[] => {
-  const filtered = participants.filter((entry) => entry.user_id !== next.user_id);
+const upsertParticipant = (
+  participants: WebRTCParticipant[],
+  next: WebRTCParticipant,
+): WebRTCParticipant[] => {
+  const filtered = participants.filter(
+    (entry) => entry.user_id !== next.user_id,
+  );
   return normalizeParticipantRoster([...filtered, next]);
 };
 
-const removeParticipantById = (participants: WebRTCParticipant[], userId: number): WebRTCParticipant[] =>
+const removeParticipantById = (
+  participants: WebRTCParticipant[],
+  userId: number,
+): WebRTCParticipant[] =>
   participants.filter((entry) => entry.user_id !== userId);
 
 const parseNumericId = (value: unknown): number | null => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
+  if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
 
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -164,7 +186,7 @@ const extractIceServers = (source: unknown): RTCIceServer[] | undefined => {
     return source as RTCIceServer[];
   }
 
-  if (typeof source === 'object') {
+  if (typeof source === "object") {
     const maybe = source as { iceServers?: unknown };
     if (Array.isArray(maybe.iceServers)) {
       return maybe.iceServers as RTCIceServer[];
@@ -186,38 +208,54 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const [messagesCursor, setMessagesCursor] = useState<string | null>(null);
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
-  const [messageInput, setMessageInput] = useState('');
+  const [messageInput, setMessageInput] = useState("");
   const [isServerActionOpen, setIsServerActionOpen] = useState(false);
   const [isLoadingServers, setIsLoadingServers] = useState(false);
   const [isLoadingChannels, setIsLoadingChannels] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
-  const [error, setError] = useState('');
-  const [wsStatus, setWsStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+  const [error, setError] = useState("");
+  const [wsStatus, setWsStatus] = useState<
+    "idle" | "connecting" | "connected" | "error"
+  >("idle");
   const [wsRetryCount, setWsRetryCount] = useState(0);
   const [uploadQueue, setUploadQueue] = useState<UploadTracker[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [previewAttachment, setPreviewAttachment] = useState<MessageAttachment | null>(null);
+  const [previewAttachment, setPreviewAttachment] =
+    useState<MessageAttachment | null>(null);
   const [composerMaxHeight, setComposerMaxHeight] = useState(240);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [typingByChannel, setTypingByChannel] = useState<Record<number, TypingEntry[]>>({});
+  const [typingByChannel, setTypingByChannel] = useState<
+    Record<number, TypingEntry[]>
+  >({});
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
   const [isCreatingChannel, setIsCreatingChannel] = useState(false);
-  const [createChannelError, setCreateChannelError] = useState('');
-  const [createChannelForm, setCreateChannelForm] = useState<{ name: string; description: string; type: 'text' | 'audio' }>(
-    {
-      name: '',
-      description: '',
-      type: 'text',
-    }
+  const [createChannelError, setCreateChannelError] = useState("");
+  const [createChannelForm, setCreateChannelForm] = useState<{
+    name: string;
+    description: string;
+    type: "text" | "audio";
+  }>({
+    name: "",
+    description: "",
+    type: "text",
+  });
+  const [webrtcState, setWebrtcState] = useState<WebRTCSessionState | null>(
+    null,
   );
-  const [webrtcState, setWebrtcState] = useState<WebRTCSessionState | null>(null);
   const [isJoiningWebRTC, setIsJoiningWebRTC] = useState(false);
   const [webrtcError, setWebrtcError] = useState<string | null>(null);
-  const [localMediaState, setLocalMediaState] = useState<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
-  const [remoteMediaStreams, setRemoteMediaStreams] = useState<Record<number, MediaStream>>({});
-  const [mediaPermissionError, setMediaPermissionError] = useState<string | null>(null);
-  const [channelParticipants, setChannelParticipants] = useState<Record<number, WebRTCParticipant[]>>({});
+  const [localMediaState, setLocalMediaState] =
+    useState<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
+  const [remoteMediaStreams, setRemoteMediaStreams] = useState<
+    Record<number, MediaStream>
+  >({});
+  const [mediaPermissionError, setMediaPermissionError] = useState<
+    string | null
+  >(null);
+  const [channelParticipants, setChannelParticipants] = useState<
+    Record<number, WebRTCParticipant[]>
+  >({});
 
   const wsRef = useRef<WebSocket | null>(null);
   const selectedServerIdRef = useRef<number | null>(null);
@@ -254,20 +292,31 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const lastTypingChannelRef = useRef<number | null>(null);
   const previousChannelIdRef = useRef<number | null>(null);
   const webrtcSessionRef = useRef<WebRTCSessionState | null>(null);
-  const pendingWebRTCAuthRef = useRef<{ sessionToken: string; channelId: number } | null>(null);
+  const pendingWebRTCAuthRef = useRef<{
+    sessionToken: string;
+    channelId: number;
+  } | null>(null);
   const localMediaStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionsRef = useRef<Map<number, RTCPeerConnection>>(new Map());
   const remoteStreamsRef = useRef<Map<number, MediaStream>>(new Map());
-  const pendingCandidatesRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
-  const remoteMediaElementsRef = useRef<Map<number, HTMLVideoElement>>(new Map());
+  const pendingCandidatesRef = useRef<Map<number, RTCIceCandidateInit[]>>(
+    new Map(),
+  );
+  const remoteMediaElementsRef = useRef<Map<number, HTMLVideoElement>>(
+    new Map(),
+  );
   const pendingPeerConnectionIdsRef = useRef<Set<number>>(new Set());
   const makingOfferRef = useRef<Map<number, boolean>>(new Map());
   const ignoreOfferRef = useRef<Map<number, boolean>>(new Map());
   const settingRemoteAnswerRef = useRef<Map<number, boolean>>(new Map());
   const localPreviewRef = useRef<HTMLVideoElement | null>(null);
   const localMediaStateRef = useRef<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
-  const remoteAudioElementsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
+  const remoteAudioElementsRef = useRef<Map<number, HTMLAudioElement>>(
+    new Map(),
+  );
   const selfLeaveSoundPlayedRef = useRef(false);
+  const userDetailsCacheRef = useRef<Map<number, CachedUserProfile>>(new Map());
+  const pendingUserLookupsRef = useRef<Set<number>>(new Set());
 
   const normalizeChannelList = useCallback(
     (list: Channel[]) =>
@@ -277,7 +326,334 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         }
         return a.name.localeCompare(b.name);
       }),
-    []
+    [],
+  );
+
+  const cacheParticipantProfile = useCallback(
+    (participant: WebRTCParticipant) => {
+      if (!participant || typeof participant.user_id !== "number") {
+        return;
+      }
+
+      const username =
+        typeof participant.username === "string" &&
+        participant.username.trim().length > 0
+          ? participant.username.trim()
+          : undefined;
+      const rawAvatar = (participant as unknown as { avatar?: unknown }).avatar;
+      const avatar =
+        typeof rawAvatar === "string"
+          ? rawAvatar
+          : rawAvatar === null
+            ? ""
+            : undefined;
+
+      if (!username && avatar === undefined) {
+        return;
+      }
+
+      const existing = userDetailsCacheRef.current.get(participant.user_id);
+      const next: CachedUserProfile = {
+        username: username ?? existing?.username,
+        avatar: avatar !== undefined ? avatar : existing?.avatar,
+        fetchedAt: Date.now(),
+      };
+
+      userDetailsCacheRef.current.set(participant.user_id, next);
+    },
+    [],
+  );
+
+  const mergeParticipantWithCache = useCallback(
+    (participant: WebRTCParticipant): WebRTCParticipant => {
+      if (!participant || typeof participant.user_id !== "number") {
+        return participant;
+      }
+
+      const cached = userDetailsCacheRef.current.get(participant.user_id);
+      if (!cached) {
+        return participant;
+      }
+
+      let updated = participant;
+
+      if (
+        (!participant.username || participant.username.trim().length === 0) &&
+        cached.username
+      ) {
+        updated = {
+          ...updated,
+          username: cached.username,
+        };
+      }
+
+      if (participant.avatar === undefined && cached.avatar !== undefined) {
+        updated = {
+          ...updated,
+          avatar: cached.avatar,
+        };
+      }
+
+      return updated;
+    },
+    [],
+  );
+
+  const hydrateUserProfiles = useCallback(
+    async (userIds: number[], channelId?: number) => {
+      if (!userIds || userIds.length === 0) {
+        return;
+      }
+
+      const unique = Array.from(
+        new Set(userIds.filter((id) => Number.isFinite(id) && id > 0)),
+      ) as number[];
+      if (unique.length === 0) {
+        return;
+      }
+
+      const now = Date.now();
+      const pending = pendingUserLookupsRef.current;
+      const cache = userDetailsCacheRef.current;
+
+      const needsLookup = unique.filter((id) => {
+        if (pending.has(id)) {
+          return false;
+        }
+
+        const cached = cache.get(id);
+        if (!cached) {
+          return true;
+        }
+
+        if (
+          USER_PROFILE_CACHE_TTL_MS > 0 &&
+          now - cached.fetchedAt > USER_PROFILE_CACHE_TTL_MS
+        ) {
+          return true;
+        }
+
+        if (!cached.username || cached.username.trim().length === 0) {
+          return true;
+        }
+
+        if (cached.avatar === undefined) {
+          return true;
+        }
+
+        return false;
+      });
+
+      if (needsLookup.length === 0) {
+        return;
+      }
+
+      needsLookup.forEach((id) => pending.add(id));
+
+      try {
+        const details = await usersAPI.lookupUsers(needsLookup);
+        const fetchedAt = Date.now();
+        const detailMap = new Map<number, UserSummary>();
+
+        details.forEach((user) => {
+          detailMap.set(user.id, user);
+          const rawAvatar = (user as unknown as { avatar?: unknown }).avatar;
+          userDetailsCacheRef.current.set(user.id, {
+            username: user.username,
+            avatar:
+              typeof rawAvatar === "string"
+                ? rawAvatar
+                : rawAvatar === null
+                  ? ""
+                  : undefined,
+            fetchedAt,
+          });
+        });
+
+        needsLookup.forEach((id) => {
+          if (!detailMap.has(id)) {
+            const existing = userDetailsCacheRef.current.get(id);
+            userDetailsCacheRef.current.set(id, {
+              username: existing?.username,
+              avatar: existing?.avatar,
+              fetchedAt,
+            });
+          }
+        });
+
+        if (detailMap.size === 0) {
+          return;
+        }
+
+        const applyDetails = (
+          participant: WebRTCParticipant,
+        ): WebRTCParticipant => {
+          const detail = detailMap.get(participant.user_id);
+          if (!detail) {
+            return participant;
+          }
+
+          const username = detail.username;
+          const rawAvatar = (detail as unknown as { avatar?: unknown }).avatar;
+          const avatar =
+            typeof rawAvatar === "string"
+              ? rawAvatar
+              : rawAvatar === null
+                ? ""
+                : undefined;
+
+          let updated = participant;
+
+          if (
+            (!participant.username ||
+              participant.username.trim().length === 0) &&
+            username
+          ) {
+            updated = {
+              ...updated,
+              username,
+            };
+          }
+
+          if (avatar !== undefined && participant.avatar !== avatar) {
+            updated = {
+              ...updated,
+              avatar,
+            };
+          }
+
+          return updated;
+        };
+
+        if (typeof channelId === "number") {
+          setChannelParticipants((prev) => {
+            const roster = prev[channelId];
+            if (!roster || roster.length === 0) {
+              return prev;
+            }
+
+            let changed = false;
+            const updated = roster.map((participant) => {
+              const nextParticipant = applyDetails(participant);
+              if (nextParticipant !== participant) {
+                changed = true;
+              }
+              return nextParticipant;
+            });
+
+            if (!changed) {
+              return prev;
+            }
+
+            return {
+              ...prev,
+              [channelId]: updated,
+            };
+          });
+
+          setWebrtcState((previous) => {
+            if (!previous || previous.channelId !== channelId) {
+              return previous;
+            }
+
+            let changed = false;
+            const updatedParticipants = previous.participants.map(
+              (participant) => {
+                const nextParticipant = applyDetails(participant);
+                if (nextParticipant !== participant) {
+                  changed = true;
+                }
+                return nextParticipant;
+              },
+            );
+
+            const updatedSelf = applyDetails(previous.participant);
+            if (updatedSelf !== previous.participant) {
+              changed = true;
+            }
+
+            if (!changed) {
+              return previous;
+            }
+
+            const nextState: WebRTCSessionState = {
+              ...previous,
+              participant: updatedSelf,
+              participants: updatedParticipants,
+            };
+
+            webrtcSessionRef.current = nextState;
+            return nextState;
+          });
+        } else {
+          setChannelParticipants((prev) => {
+            let changed = false;
+            const next: Record<number, WebRTCParticipant[]> = {};
+
+            for (const [key, roster] of Object.entries(prev)) {
+              const channelKey = Number(key);
+              let rosterChanged = false;
+              const updated = roster.map((participant) => {
+                const nextParticipant = applyDetails(participant);
+                if (nextParticipant !== participant) {
+                  rosterChanged = true;
+                }
+                return nextParticipant;
+              });
+
+              if (rosterChanged) {
+                changed = true;
+                next[channelKey] = updated;
+              } else {
+                next[channelKey] = roster;
+              }
+            }
+
+            return changed ? next : prev;
+          });
+
+          setWebrtcState((previous) => {
+            if (!previous) {
+              return previous;
+            }
+
+            let changed = false;
+            const updatedSelf = applyDetails(previous.participant);
+            if (updatedSelf !== previous.participant) {
+              changed = true;
+            }
+
+            const updatedParticipants = previous.participants.map(
+              (participant) => {
+                const nextParticipant = applyDetails(participant);
+                if (nextParticipant !== participant) {
+                  changed = true;
+                }
+                return nextParticipant;
+              },
+            );
+
+            if (!changed) {
+              return previous;
+            }
+
+            const nextState: WebRTCSessionState = {
+              ...previous,
+              participant: updatedSelf,
+              participants: updatedParticipants,
+            };
+
+            webrtcSessionRef.current = nextState;
+            return nextState;
+          });
+        }
+      } catch (lookupError) {
+        console.debug("Failed to hydrate user profiles", lookupError);
+      } finally {
+        needsLookup.forEach((id) => pending.delete(id));
+      }
+    },
+    [setChannelParticipants, setWebrtcState],
   );
 
   const canManageChannels = useMemo(() => {
@@ -285,7 +661,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return false;
     }
     if (selectedServer.current_member_role) {
-      return selectedServer.current_member_role === 'owner';
+      return selectedServer.current_member_role === "owner";
     }
     return selectedServer.owner_id === currentUser.id;
   }, [selectedServer, currentUser]);
@@ -316,12 +692,17 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     const previousId = previousChannelIdRef.current;
     const nextId = selectedChannel?.id ?? null;
 
-    if (previousId && previousId !== nextId && lastTypingChannelRef.current === previousId) {
-      channelsAPI
-        .sendTypingIndicator(previousId, false)
-        .catch((error) => {
-          console.debug('Failed to send typing stop signal during channel switch', error);
-        });
+    if (
+      previousId &&
+      previousId !== nextId &&
+      lastTypingChannelRef.current === previousId
+    ) {
+      channelsAPI.sendTypingIndicator(previousId, false).catch((error) => {
+        console.debug(
+          "Failed to send typing stop signal during channel switch",
+          error,
+        );
+      });
       lastTypingChannelRef.current = null;
     }
 
@@ -329,8 +710,6 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     typingCooldownRef.current = 0;
     previousChannelIdRef.current = nextId;
   }, [selectedChannel?.id]);
-
-  
 
   useEffect(() => {
     let isMounted = true;
@@ -347,20 +726,20 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         }
 
         const status =
-          typeof error === 'object' &&
+          typeof error === "object" &&
           error !== null &&
-          'response' in error &&
+          "response" in error &&
           (error as { response?: { status?: number } }).response?.status;
 
         if (status === 401) {
-          localStorage.removeItem('authToken');
+          localStorage.removeItem("authToken");
           if (navigate) {
-            navigate('/login');
+            navigate("/login");
           }
           return;
         }
 
-        console.warn('Failed to load current user', error);
+        console.warn("Failed to load current user", error);
       }
     };
 
@@ -401,7 +780,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return true;
     }
 
-    const distanceFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+    const distanceFromBottom =
+      container.scrollHeight - container.clientHeight - container.scrollTop;
     const shouldScroll = distanceFromBottom <= 160;
     forceScrollToBottomRef.current = shouldScroll;
     return shouldScroll;
@@ -413,7 +793,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
 
-    const distanceFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+    const distanceFromBottom =
+      container.scrollHeight - container.clientHeight - container.scrollTop;
 
     if (forceScrollToBottomRef.current) {
       // Use an immediate jump when we are explicitly forcing the scroll so
@@ -423,7 +804,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     }
 
     if (distanceFromBottom <= 160) {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
     }
   }, []);
 
@@ -454,7 +835,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           // keep forcing until ResizeObserver settles
           forceScrollToBottomRef.current = true;
         } else {
-          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: "smooth",
+          });
         }
       }
 
@@ -462,7 +846,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         forceScrollToBottomRef.current = true;
       }
     },
-    [setAutoScrollOnNextRender]
+    [setAutoScrollOnNextRender],
   );
 
   const jumpToBottomWithRetries = useCallback(
@@ -489,14 +873,14 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
       scheduleNext();
     },
-    [clearForcedScrollLoops, handleJumpToBottom]
+    [clearForcedScrollLoops, handleJumpToBottom],
   );
 
   useEffect(
     () => () => {
       clearForcedScrollLoops();
     },
-    [clearForcedScrollLoops]
+    [clearForcedScrollLoops],
   );
 
   // When switching channels we want to suppress immediate "load older messages"
@@ -551,7 +935,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         }
       }
 
-      if (!mutated && Object.keys(previous).length === Object.keys(next).length) {
+      if (
+        !mutated &&
+        Object.keys(previous).length === Object.keys(next).length
+      ) {
         return previous;
       }
 
@@ -559,23 +946,20 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     });
   }, []);
 
-  const sendWebSocketMessage = useCallback(
-    (payload: unknown): boolean => {
-      const socket = wsRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        return false;
-      }
+  const sendWebSocketMessage = useCallback((payload: unknown): boolean => {
+    const socket = wsRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
 
-      try {
-        socket.send(JSON.stringify(payload));
-        return true;
-      } catch (error) {
-        console.debug('Failed to send websocket payload', error);
-        return false;
-      }
-    },
-    []
-  );
+    try {
+      socket.send(JSON.stringify(payload));
+      return true;
+    } catch (error) {
+      console.debug("Failed to send websocket payload", error);
+      return false;
+    }
+  }, []);
 
   const authenticateWebRTCSession = useCallback(
     (session: WebRTCSessionState) => {
@@ -585,7 +969,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       };
 
       const sent = sendWebSocketMessage({
-        type: 'session.authenticate',
+        type: "session.authenticate",
         data: {
           session_token: session.sessionToken,
           channel_id: session.channelId,
@@ -596,18 +980,22 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         pendingWebRTCAuthRef.current = null;
       }
     },
-    [sendWebSocketMessage]
+    [sendWebSocketMessage],
   );
 
   const updateWebRTCState = useCallback(
-    (updater: (previous: WebRTCSessionState | null) => WebRTCSessionState | null) => {
+    (
+      updater: (
+        previous: WebRTCSessionState | null,
+      ) => WebRTCSessionState | null,
+    ) => {
       setWebrtcState((previous) => {
         const next = updater(previous);
         webrtcSessionRef.current = next;
         return next;
       });
     },
-    []
+    [],
   );
 
   const teardownWebRTCSession = useCallback(() => {
@@ -621,12 +1009,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           try {
             connection.removeTrack(sender);
           } catch (removeError) {
-            console.debug('Failed to remove track during teardown', removeError);
+            console.debug(
+              "Failed to remove track during teardown",
+              removeError,
+            );
           }
         });
         connection.close();
       } catch (closeError) {
-        console.debug('Peer connection teardown error', closeError);
+        console.debug("Peer connection teardown error", closeError);
       }
     });
 
@@ -647,14 +1038,14 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       try {
         element.srcObject = null;
       } catch (audioDetachError) {
-        console.debug('Remote audio teardown error', audioDetachError);
+        console.debug("Remote audio teardown error", audioDetachError);
       }
     });
     remoteAudioElementsRef.current.clear();
 
     setRemoteMediaStreams({});
 
-  pendingPeerConnectionIdsRef.current.clear();
+    pendingPeerConnectionIdsRef.current.clear();
 
     const localStream = localMediaStreamRef.current;
     if (localStream) {
@@ -671,7 +1062,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   }, []);
 
   const updateLocalMediaState = useCallback(
-    (patch: Partial<WebRTCMediaState>, options: { broadcast?: boolean } = {}) => {
+    (
+      patch: Partial<WebRTCMediaState>,
+      options: { broadcast?: boolean } = {},
+    ) => {
       setLocalMediaState((previous) => {
         const base = mergeMediaState(DEFAULT_MEDIA_STATE, previous);
         const next: WebRTCMediaState = {
@@ -680,13 +1074,17 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           screen: patch.screen ?? base.screen,
         };
 
-        if (next.mic === base.mic && next.camera === base.camera && next.screen === base.screen) {
+        if (
+          next.mic === base.mic &&
+          next.camera === base.camera &&
+          next.screen === base.screen
+        ) {
           return previous;
         }
 
         if (options.broadcast !== false) {
           sendWebSocketMessage({
-            type: 'participant.update',
+            type: "participant.update",
             data: {
               media_state: next,
             },
@@ -699,13 +1097,19 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
             const nextParticipant: WebRTCParticipant = {
               ...session.participant,
-              media_state: mergeMediaState(session.participant.media_state, next),
+              media_state: mergeMediaState(
+                session.participant.media_state,
+                next,
+              ),
             };
 
             const updatedParticipants = session.participants.map((entry) =>
               entry.user_id === nextParticipant.user_id
-                ? { ...entry, media_state: mergeMediaState(entry.media_state, next) }
-                : entry
+                ? {
+                    ...entry,
+                    media_state: mergeMediaState(entry.media_state, next),
+                  }
+                : entry,
             );
 
             return {
@@ -719,13 +1123,18 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         return next;
       });
     },
-    [sendWebSocketMessage, updateWebRTCState]
+    [sendWebSocketMessage, updateWebRTCState],
   );
 
   const ensureLocalMedia = useCallback(
     async (options: { video?: boolean } = {}): Promise<MediaStream | null> => {
-      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-        setMediaPermissionError('Media capture is not supported in this browser.');
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.mediaDevices?.getUserMedia
+      ) {
+        setMediaPermissionError(
+          "Media capture is not supported in this browser.",
+        );
         return null;
       }
 
@@ -755,7 +1164,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           stream.getVideoTracks().forEach((track) => {
             track.enabled = wantsVideo;
             track.onended = () => {
-              updateLocalMediaState({ camera: 'off' }, { broadcast: true });
+              updateLocalMediaState({ camera: "off" }, { broadcast: true });
             };
           });
         } else if (wantsVideo && stream.getVideoTracks().length === 0) {
@@ -776,7 +1185,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           if (videoTrack) {
             videoTrack.enabled = true;
             videoTrack.onended = () => {
-              updateLocalMediaState({ camera: 'off' }, { broadcast: true });
+              updateLocalMediaState({ camera: "off" }, { broadcast: true });
             };
             stream.addTrack(videoTrack);
 
@@ -800,92 +1209,96 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
         return stream ?? null;
       } catch (captureError) {
-        console.warn('Failed to access media devices', captureError);
+        console.warn("Failed to access media devices", captureError);
         if (!stream) {
-          setMediaPermissionError('Microphone or camera access was denied. Update permissions to join with audio.');
+          setMediaPermissionError(
+            "Microphone or camera access was denied. Update permissions to join with audio.",
+          );
         } else if (wantsVideo) {
-          setMediaPermissionError('We could not enable your camera. Please verify browser permissions.');
+          setMediaPermissionError(
+            "We could not enable your camera. Please verify browser permissions.",
+          );
         }
         return null;
       }
     },
-    [updateLocalMediaState]
+    [updateLocalMediaState],
   );
 
-  const closePeerConnection = useCallback(
-    (userId: number) => {
-      const connection = peerConnectionsRef.current.get(userId);
-      if (!connection) {
-        return;
-      }
-
-      peerConnectionsRef.current.delete(userId);
-      pendingCandidatesRef.current.delete(userId);
-      makingOfferRef.current.delete(userId);
-      ignoreOfferRef.current.delete(userId);
-      settingRemoteAnswerRef.current.delete(userId);
-
-      try {
-        connection.onicecandidate = null;
-        connection.ontrack = null;
-        connection.onnegotiationneeded = null;
-        connection.onconnectionstatechange = null;
-        connection.getSenders().forEach((sender) => {
-          try {
-            connection.removeTrack(sender);
-          } catch (removeError) {
-            console.debug('removeTrack failed during close', removeError);
-          }
-        });
-        connection.close();
-      } catch (connectionError) {
-        console.debug('Error closing peer connection', connectionError);
-      }
-
-      const remoteStream = remoteStreamsRef.current.get(userId);
-      if (remoteStream) {
-        remoteStream.getTracks().forEach((track) => track.stop());
-        remoteStreamsRef.current.delete(userId);
-      }
-
-      setRemoteMediaStreams((previous) => {
-        if (!(userId in previous)) {
-          return previous;
-        }
-        const { [userId]: _, ...rest } = previous;
-        return rest;
-      });
-
-      const mediaElement = remoteMediaElementsRef.current.get(userId);
-      if (mediaElement) {
-        mediaElement.srcObject = null;
-        remoteMediaElementsRef.current.delete(userId);
-      }
-    },
-    []
-  );
-
-  const drainPendingIceCandidates = useCallback(async (userId: number, connection: RTCPeerConnection) => {
-    const pending = pendingCandidatesRef.current.get(userId);
-    if (!pending || pending.length === 0) {
+  const closePeerConnection = useCallback((userId: number) => {
+    const connection = peerConnectionsRef.current.get(userId);
+    if (!connection) {
       return;
     }
 
+    peerConnectionsRef.current.delete(userId);
     pendingCandidatesRef.current.delete(userId);
+    makingOfferRef.current.delete(userId);
+    ignoreOfferRef.current.delete(userId);
+    settingRemoteAnswerRef.current.delete(userId);
 
-    for (const candidate of pending) {
-      try {
-        await connection.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (candidateError) {
-        console.warn('Failed to add queued ICE candidate', candidateError);
+    try {
+      connection.onicecandidate = null;
+      connection.ontrack = null;
+      connection.onnegotiationneeded = null;
+      connection.onconnectionstatechange = null;
+      connection.getSenders().forEach((sender) => {
+        try {
+          connection.removeTrack(sender);
+        } catch (removeError) {
+          console.debug("removeTrack failed during close", removeError);
+        }
+      });
+      connection.close();
+    } catch (connectionError) {
+      console.debug("Error closing peer connection", connectionError);
+    }
+
+    const remoteStream = remoteStreamsRef.current.get(userId);
+    if (remoteStream) {
+      remoteStream.getTracks().forEach((track) => track.stop());
+      remoteStreamsRef.current.delete(userId);
+    }
+
+    setRemoteMediaStreams((previous) => {
+      if (!(userId in previous)) {
+        return previous;
       }
+      const { [userId]: _, ...rest } = previous;
+      return rest;
+    });
+
+    const mediaElement = remoteMediaElementsRef.current.get(userId);
+    if (mediaElement) {
+      mediaElement.srcObject = null;
+      remoteMediaElementsRef.current.delete(userId);
     }
   }, []);
+
+  const drainPendingIceCandidates = useCallback(
+    async (userId: number, connection: RTCPeerConnection) => {
+      const pending = pendingCandidatesRef.current.get(userId);
+      if (!pending || pending.length === 0) {
+        return;
+      }
+
+      pendingCandidatesRef.current.delete(userId);
+
+      for (const candidate of pending) {
+        try {
+          await connection.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (candidateError) {
+          console.warn("Failed to add queued ICE candidate", candidateError);
+        }
+      }
+    },
+    [],
+  );
 
   const getOrCreatePeerConnection = useCallback(
     async (targetUserId: number): Promise<RTCPeerConnection | null> => {
       const session = webrtcSessionRef.current;
-      if (!session || session.status !== 'connected') {
+      if (!session || session.status !== "connected") {
         return null;
       }
 
@@ -909,7 +1322,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
         const candidate = event.candidate.toJSON();
         sendWebSocketMessage({
-          type: 'webrtc.ice_candidate',
+          type: "webrtc.ice_candidate",
           data: {
             target_user_id: targetUserId,
             candidate: candidate.candidate,
@@ -936,7 +1349,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
       connection.onconnectionstatechange = () => {
         const state = connection.connectionState;
-        if (state === 'failed' || state === 'closed') {
+        if (state === "failed" || state === "closed") {
           closePeerConnection(targetUserId);
         }
       };
@@ -952,7 +1365,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           const offer = await connection.createOffer();
           await connection.setLocalDescription(offer);
           sendWebSocketMessage({
-            type: 'webrtc.offer',
+            type: "webrtc.offer",
             data: {
               target_user_id: targetUserId,
               sdp: offer.sdp,
@@ -960,22 +1373,24 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             },
           });
         } catch (offerError) {
-          console.warn('Failed to negotiate WebRTC offer', offerError);
+          console.warn("Failed to negotiate WebRTC offer", offerError);
         } finally {
           makingOfferRef.current.set(targetUserId, false);
         }
       };
 
       peerConnectionsRef.current.set(targetUserId, connection);
-  makingOfferRef.current.set(targetUserId, false);
-  ignoreOfferRef.current.set(targetUserId, false);
-  settingRemoteAnswerRef.current.set(targetUserId, false);
+      makingOfferRef.current.set(targetUserId, false);
+      ignoreOfferRef.current.set(targetUserId, false);
+      settingRemoteAnswerRef.current.set(targetUserId, false);
 
-      const wantsVideo = localMediaStateRef.current.camera === 'on';
+      const wantsVideo = localMediaStateRef.current.camera === "on";
       const localStream = await ensureLocalMedia({ video: wantsVideo });
       if (localStream) {
         localStream.getTracks().forEach((track) => {
-          const alreadySending = connection.getSenders().some((sender) => sender.track === track);
+          const alreadySending = connection
+            .getSenders()
+            .some((sender) => sender.track === track);
           if (!alreadySending) {
             connection.addTrack(track, localStream);
           }
@@ -984,14 +1399,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
       return connection;
     },
-    [closePeerConnection, ensureLocalMedia, sendWebSocketMessage]
+    [closePeerConnection, ensureLocalMedia, sendWebSocketMessage],
   );
 
   const handleIncomingOffer = useCallback(
     async (data: Record<string, unknown>) => {
       const fromUserId = parseNumericId(data.from_user_id);
-      const sdp = typeof data.sdp === 'string' ? data.sdp : null;
-      const type = typeof data.type === 'string' ? (data.type as RTCSdpType) : 'offer';
+      const sdp = typeof data.sdp === "string" ? data.sdp : null;
+      const type =
+        typeof data.type === "string" ? (data.type as RTCSdpType) : "offer";
 
       if (!fromUserId || !sdp) {
         return;
@@ -1005,8 +1421,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       const currentUserId = currentUserIdRef.current;
       const polite = !currentUserId || currentUserId > fromUserId;
       const makingOffer = makingOfferRef.current.get(fromUserId) ?? false;
-      const settingAnswer = settingRemoteAnswerRef.current.get(fromUserId) ?? false;
-      const offerCollision = connection.signalingState !== 'stable' || makingOffer || settingAnswer;
+      const settingAnswer =
+        settingRemoteAnswerRef.current.get(fromUserId) ?? false;
+      const offerCollision =
+        connection.signalingState !== "stable" || makingOffer || settingAnswer;
       const shouldIgnore = !polite && offerCollision;
 
       ignoreOfferRef.current.set(fromUserId, shouldIgnore);
@@ -1016,16 +1434,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
       if (offerCollision) {
         try {
-          await connection.setLocalDescription({ type: 'rollback' });
+          await connection.setLocalDescription({ type: "rollback" });
         } catch (rollbackError) {
-          console.warn('Failed to rollback local description', rollbackError);
+          console.warn("Failed to rollback local description", rollbackError);
         }
       }
 
       try {
         await connection.setRemoteDescription({ type, sdp });
       } catch (descriptionError) {
-        console.warn('Failed to apply remote offer', descriptionError);
+        console.warn("Failed to apply remote offer", descriptionError);
         return;
       }
 
@@ -1035,7 +1453,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
         sendWebSocketMessage({
-          type: 'webrtc.answer',
+          type: "webrtc.answer",
           data: {
             target_user_id: fromUserId,
             sdp: answer.sdp,
@@ -1043,17 +1461,22 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           },
         });
       } catch (answerError) {
-        console.warn('Failed to create WebRTC answer', answerError);
+        console.warn("Failed to create WebRTC answer", answerError);
       }
     },
-    [drainPendingIceCandidates, getOrCreatePeerConnection, sendWebSocketMessage]
+    [
+      drainPendingIceCandidates,
+      getOrCreatePeerConnection,
+      sendWebSocketMessage,
+    ],
   );
 
   const handleIncomingAnswer = useCallback(
     async (data: Record<string, unknown>) => {
       const fromUserId = parseNumericId(data.from_user_id);
-      const sdp = typeof data.sdp === 'string' ? data.sdp : null;
-      const type = typeof data.type === 'string' ? (data.type as RTCSdpType) : 'answer';
+      const sdp = typeof data.sdp === "string" ? data.sdp : null;
+      const type =
+        typeof data.type === "string" ? (data.type as RTCSdpType) : "answer";
 
       if (!fromUserId || !sdp) {
         return;
@@ -1070,18 +1493,19 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         await connection.setRemoteDescription({ type, sdp });
         await drainPendingIceCandidates(fromUserId, connection);
       } catch (answerError) {
-        console.warn('Failed to apply remote answer', answerError);
+        console.warn("Failed to apply remote answer", answerError);
       } finally {
         settingRemoteAnswerRef.current.set(fromUserId, false);
       }
     },
-    [drainPendingIceCandidates]
+    [drainPendingIceCandidates],
   );
 
   const handleIncomingCandidate = useCallback(
     async (data: Record<string, unknown>) => {
       const fromUserId = parseNumericId(data.from_user_id);
-      const candidateValue = typeof data.candidate === 'string' ? data.candidate : null;
+      const candidateValue =
+        typeof data.candidate === "string" ? data.candidate : null;
       if (!fromUserId || !candidateValue) {
         return;
       }
@@ -1090,17 +1514,17 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         candidate: candidateValue,
       };
 
-      if (typeof data.sdp_mid === 'string') {
+      if (typeof data.sdp_mid === "string") {
         candidate.sdpMid = data.sdp_mid;
-      } else if (typeof data.sdpMid === 'string') {
+      } else if (typeof data.sdpMid === "string") {
         candidate.sdpMid = data.sdpMid;
       }
 
-      if (typeof data.sdp_mline_index === 'number') {
+      if (typeof data.sdp_mline_index === "number") {
         candidate.sdpMLineIndex = data.sdp_mline_index;
-      } else if (typeof data.sdpMLineIndex === 'number') {
+      } else if (typeof data.sdpMLineIndex === "number") {
         candidate.sdpMLineIndex = data.sdpMLineIndex;
-      } else if (typeof data.sdp_mline_index === 'string') {
+      } else if (typeof data.sdp_mline_index === "string") {
         const parsed = Number(data.sdp_mline_index);
         if (Number.isFinite(parsed)) {
           candidate.sdpMLineIndex = parsed;
@@ -1118,45 +1542,50 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       try {
         await connection.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (candidateError) {
-        console.warn('Failed to apply ICE candidate', candidateError);
+        console.warn("Failed to apply ICE candidate", candidateError);
       }
     },
-    []
+    [],
   );
 
   const handleToggleMic = useCallback(async () => {
     const session = webrtcSessionRef.current;
-    if (!session || session.status !== 'connected') {
-      setMediaPermissionError('Join the audio channel before toggling your microphone.');
+    if (!session || session.status !== "connected") {
+      setMediaPermissionError(
+        "Join the audio channel before toggling your microphone.",
+      );
       return;
     }
 
-    const wantsVideo = localMediaStateRef.current.camera === 'on';
+    const wantsVideo = localMediaStateRef.current.camera === "on";
     const stream = await ensureLocalMedia({ video: wantsVideo });
     if (!stream) {
       return;
     }
 
-    const nextMicState: 'on' | 'off' = localMediaStateRef.current.mic === 'on' ? 'off' : 'on';
+    const nextMicState: "on" | "off" =
+      localMediaStateRef.current.mic === "on" ? "off" : "on";
     stream.getAudioTracks().forEach((track) => {
-      track.enabled = nextMicState === 'on';
+      track.enabled = nextMicState === "on";
     });
 
     setMediaPermissionError(null);
     updateLocalMediaState({ mic: nextMicState }, { broadcast: true });
-    
+
     // Play mute/unmute notification sound
-    notificationSounds.play(nextMicState === 'on' ? 'unmute' : 'mute');
+    notificationSounds.play(nextMicState === "on" ? "unmute" : "mute");
   }, [ensureLocalMedia, updateLocalMediaState]);
 
   const handleToggleCamera = useCallback(async () => {
     const session = webrtcSessionRef.current;
-    if (!session || session.status !== 'connected') {
-      setMediaPermissionError('Join the audio channel before toggling your camera.');
+    if (!session || session.status !== "connected") {
+      setMediaPermissionError(
+        "Join the audio channel before toggling your camera.",
+      );
       return;
     }
 
-    const enabling = localMediaStateRef.current.camera !== 'on';
+    const enabling = localMediaStateRef.current.camera !== "on";
     const stream = await ensureLocalMedia({ video: enabling });
     if (!stream) {
       return;
@@ -1164,7 +1593,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
     const videoTracks = stream.getVideoTracks();
     if (enabling && videoTracks.length === 0) {
-      setMediaPermissionError('No camera was detected. Check your device permissions.');
+      setMediaPermissionError(
+        "No camera was detected. Check your device permissions.",
+      );
       return;
     }
 
@@ -1176,7 +1607,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       setMediaPermissionError(null);
     }
 
-    updateLocalMediaState({ camera: enabling ? 'on' : 'off' }, { broadcast: true });
+    updateLocalMediaState(
+      { camera: enabling ? "on" : "off" },
+      { broadcast: true },
+    );
   }, [ensureLocalMedia, updateLocalMediaState]);
 
   const handleLeaveAudioChannel = useCallback(async () => {
@@ -1188,9 +1622,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       teardownWebRTCSession();
       if (!selfLeaveSoundPlayedRef.current) {
         try {
-          notificationSounds.play('leave_channel');
+          notificationSounds.play("leave_channel");
         } catch (playError) {
-          console.debug('Failed to play leave sound', playError);
+          console.debug("Failed to play leave sound", playError);
         }
         selfLeaveSoundPlayedRef.current = true;
       }
@@ -1199,7 +1633,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
     const channelId = session.channelId;
     const selfId = session.participant?.user_id;
-    if (typeof selfId === 'number') {
+    if (typeof selfId === "number") {
       setChannelParticipants((prev) => {
         const current = prev[channelId] || [];
         const updated = removeParticipantById(current, selfId);
@@ -1228,15 +1662,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
     if (!selfLeaveSoundPlayedRef.current) {
       try {
-        notificationSounds.play('leave_channel');
+        notificationSounds.play("leave_channel");
       } catch (playError) {
-        console.debug('Failed to play leave sound', playError);
+        console.debug("Failed to play leave sound", playError);
       }
       selfLeaveSoundPlayedRef.current = true;
     }
 
     sendWebSocketMessage({
-      type: 'session.leave',
+      type: "session.leave",
       data: {
         channel_id: session.channelId,
       },
@@ -1245,19 +1679,23 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     try {
       await channelsAPI.leaveWebRTC(session.channelId, session.sessionToken);
     } catch (leaveError) {
-      console.debug('Failed to terminate WebRTC session cleanly', leaveError);
+      console.debug("Failed to terminate WebRTC session cleanly", leaveError);
     }
   }, [sendWebSocketMessage, teardownWebRTCSession, updateWebRTCState]);
 
   const handleJoinAudioChannel = useCallback(async () => {
-    if (!selectedChannel || selectedChannel.type !== 'audio' || isJoiningWebRTC) {
+    if (
+      !selectedChannel ||
+      selectedChannel.type !== "audio" ||
+      isJoiningWebRTC
+    ) {
       return;
     }
 
     const existingSession = webrtcSessionRef.current;
     if (existingSession) {
       const sameChannel = existingSession.channelId === selectedChannel.id;
-      const sessionHealthy = sameChannel && existingSession.status !== 'error';
+      const sessionHealthy = sameChannel && existingSession.status !== "error";
 
       if (sessionHealthy) {
         return;
@@ -1277,48 +1715,90 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         ...(response.participants ?? []),
       ]);
 
-      const others = roster.filter((entry) => entry.user_id !== response.participant.user_id);
+      const enrichedRoster = roster.map((participant) => {
+        cacheParticipantProfile(participant);
+        return mergeParticipantWithCache(participant);
+      });
+
+      const selfParticipant =
+        enrichedRoster.find(
+          (entry) => entry.user_id === response.participant.user_id,
+        ) ?? mergeParticipantWithCache(response.participant);
+
+      const others = enrichedRoster.filter(
+        (entry) => entry.user_id !== response.participant.user_id,
+      );
 
       const session: WebRTCSessionState = {
         channelId: selectedChannel.id,
         sessionToken: response.session_token,
         expiresAt: response.expires_at,
-        participant: response.participant,
+        participant: selfParticipant,
         participants: others,
         iceservers: response.iceservers,
         sfu: response.sfu,
-        status: 'authenticating',
+        status: "authenticating",
       };
 
       setChannelParticipants((previous) => ({
         ...previous,
-        [selectedChannel.id]: roster,
+        [selectedChannel.id]: enrichedRoster,
       }));
+
+      const missingProfiles = enrichedRoster
+        .filter(
+          (participant) =>
+            participant.avatar === undefined || !participant.username,
+        )
+        .map((participant) => participant.user_id);
+
+      if (missingProfiles.length > 0) {
+        void hydrateUserProfiles(missingProfiles, selectedChannel.id);
+      }
 
       updateWebRTCState(() => session);
 
       authenticateWebRTCSession(session);
     } catch (joinError) {
       const apiMessage =
-        typeof joinError === 'object' &&
+        typeof joinError === "object" &&
         joinError !== null &&
-        'response' in joinError &&
-        (joinError as { response?: { data?: { error?: string } } }).response?.data?.error;
+        "response" in joinError &&
+        (joinError as { response?: { data?: { error?: string } } }).response
+          ?.data?.error;
 
-      const fallback = 'We couldn’t connect you to this audio channel. Please try again.';
-      setWebrtcError(typeof apiMessage === 'string' && apiMessage.trim().length > 0 ? apiMessage : fallback);
+      const fallback =
+        "We couldn’t connect you to this audio channel. Please try again.";
+      setWebrtcError(
+        typeof apiMessage === "string" && apiMessage.trim().length > 0
+          ? apiMessage
+          : fallback,
+      );
       updateWebRTCState(() => null);
     } finally {
       setIsJoiningWebRTC(false);
     }
-  }, [authenticateWebRTCSession, handleLeaveAudioChannel, isJoiningWebRTC, selectedChannel, teardownWebRTCSession, updateWebRTCState]);
+  }, [
+    authenticateWebRTCSession,
+    cacheParticipantProfile,
+    handleLeaveAudioChannel,
+    hydrateUserProfiles,
+    isJoiningWebRTC,
+    mergeParticipantWithCache,
+    selectedChannel,
+    teardownWebRTCSession,
+    updateWebRTCState,
+  ]);
 
-  useEffect(() => () => {
-    void handleLeaveAudioChannel();
-  }, [handleLeaveAudioChannel]);
+  useEffect(
+    () => () => {
+      void handleLeaveAudioChannel();
+    },
+    [handleLeaveAudioChannel],
+  );
 
   useEffect(() => {
-    if (!selectedChannel || selectedChannel.type !== 'audio') {
+    if (!selectedChannel || selectedChannel.type !== "audio") {
       return;
     }
 
@@ -1326,7 +1806,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   }, [handleJoinAudioChannel, selectedChannel]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return;
     }
 
@@ -1343,13 +1823,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   }, [pruneTypingIndicators]);
 
   const startTyping = useCallback(() => {
-    if (!selectedChannel || selectedChannel.type !== 'text') {
+    if (!selectedChannel || selectedChannel.type !== "text") {
       return;
     }
 
     const channelId = selectedChannel.id;
     const now = Date.now();
-    if (now - typingCooldownRef.current < TYPING_THROTTLE_MS && lastTypingChannelRef.current === channelId) {
+    if (
+      now - typingCooldownRef.current < TYPING_THROTTLE_MS &&
+      lastTypingChannelRef.current === channelId
+    ) {
       return;
     }
 
@@ -1357,31 +1840,32 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     isTypingRef.current = true;
     lastTypingChannelRef.current = channelId;
 
-    channelsAPI
-      .sendTypingIndicator(channelId, true)
-      .catch((error) => {
-        console.debug('Failed to send typing indicator', error);
-      });
+    channelsAPI.sendTypingIndicator(channelId, true).catch((error) => {
+      console.debug("Failed to send typing indicator", error);
+    });
   }, [selectedChannel]);
 
   const stopTyping = useCallback(
     (channelOverride?: number) => {
-      const fallbackChannelId = lastTypingChannelRef.current ?? selectedChannel?.id ?? null;
+      const fallbackChannelId =
+        lastTypingChannelRef.current ?? selectedChannel?.id ?? null;
       const channelId = channelOverride ?? fallbackChannelId;
 
       if (!channelId) {
         return;
       }
 
-      if (!channelOverride && !isTypingRef.current && lastTypingChannelRef.current === null) {
+      if (
+        !channelOverride &&
+        !isTypingRef.current &&
+        lastTypingChannelRef.current === null
+      ) {
         return;
       }
 
-      channelsAPI
-        .sendTypingIndicator(channelId, false)
-        .catch((error) => {
-          console.debug('Failed to send typing stop indicator', error);
-        });
+      channelsAPI.sendTypingIndicator(channelId, false).catch((error) => {
+        console.debug("Failed to send typing stop indicator", error);
+      });
 
       if (!channelOverride || channelId === selectedChannel?.id) {
         isTypingRef.current = false;
@@ -1393,7 +1877,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
       typingCooldownRef.current = 0;
     },
-    [selectedChannel]
+    [selectedChannel],
   );
 
   useEffect(
@@ -1403,17 +1887,18 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         return;
       }
 
-      channelsAPI
-        .sendTypingIndicator(channelId, false)
-        .catch((error) => {
-          console.debug('Failed to send typing stop signal during cleanup', error);
-        });
+      channelsAPI.sendTypingIndicator(channelId, false).catch((error) => {
+        console.debug(
+          "Failed to send typing stop signal during cleanup",
+          error,
+        );
+      });
     },
-    []
+    [],
   );
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return;
     }
 
@@ -1424,10 +1909,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     };
 
     updateMaxHeight();
-    window.addEventListener('resize', updateMaxHeight);
+    window.addEventListener("resize", updateMaxHeight);
 
     return () => {
-      window.removeEventListener('resize', updateMaxHeight);
+      window.removeEventListener("resize", updateMaxHeight);
     };
   }, []);
 
@@ -1437,11 +1922,12 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
 
-    textarea.style.height = 'auto';
+    textarea.style.height = "auto";
     const measured = Math.min(textarea.scrollHeight, composerMaxHeight);
     const nextHeight = Math.max(measured, 44);
     textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > composerMaxHeight ? 'auto' : 'hidden';
+    textarea.style.overflowY =
+      textarea.scrollHeight > composerMaxHeight ? "auto" : "hidden";
   }, [messageInput, composerMaxHeight]);
 
   useEffect(() => {
@@ -1498,14 +1984,37 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
         // Fetch channel participants
         try {
-          const participantsData = await serversAPI.getChannelParticipants(selectedServer.id);
+          const participantsData = await serversAPI.getChannelParticipants(
+            selectedServer.id,
+          );
           if (isMounted) {
             const participantsMap: Record<number, WebRTCParticipant[]> = {};
-            for (const [channelIdStr, participants] of Object.entries(participantsData)) {
-              const channelId = parseInt(channelIdStr, 10);
-              participantsMap[channelId] = participants;
+            const missingProfiles = new Set<number>();
+            for (const [channelIdStr, participants] of Object.entries(
+              participantsData,
+            )) {
+              const channelId = Number.parseInt(channelIdStr, 10);
+              if (!Number.isFinite(channelId)) {
+                continue;
+              }
+
+              const enrichedRoster = participants.map((participant) => {
+                cacheParticipantProfile(participant);
+                const merged = mergeParticipantWithCache(participant);
+                if (merged.avatar === undefined) {
+                  missingProfiles.add(merged.user_id);
+                }
+                return merged;
+              });
+
+              participantsMap[channelId] = enrichedRoster;
             }
+
             setChannelParticipants(participantsMap);
+
+            if (missingProfiles.size > 0) {
+              void hydrateUserProfiles(Array.from(missingProfiles));
+            }
           }
         } catch (err) {
           // Silently fail participant fetch - not critical
@@ -1523,7 +2032,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           if (current && sorted.some((channel) => channel.id === current.id)) {
             return current;
           }
-          const firstTextChannel = sorted.find((channel) => channel.type === 'text');
+          const firstTextChannel = sorted.find(
+            (channel) => channel.type === "text",
+          );
           return firstTextChannel ?? sorted[0];
         });
       } catch (err) {
@@ -1543,10 +2054,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     return () => {
       isMounted = false;
     };
-  }, [normalizeChannelList, selectedServer]);
+  }, [
+    cacheParticipantProfile,
+    hydrateUserProfiles,
+    mergeParticipantWithCache,
+    normalizeChannelList,
+    selectedServer,
+  ]);
 
   useEffect(() => {
-    if (!selectedChannel || selectedChannel.type !== 'text') {
+    if (!selectedChannel || selectedChannel.type !== "text") {
       setMessages([]);
       setHasMoreMessages(false);
       setMessagesCursor(null);
@@ -1570,7 +2087,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         }
 
         const fetchedMessages = result?.messages ?? [];
-        const nextCursor = result?.next_cursor ?? (fetchedMessages[0]?.created_at ?? null);
+        const nextCursor =
+          result?.next_cursor ?? fetchedMessages[0]?.created_at ?? null;
 
         setHasMoreMessages(result?.has_more ?? false);
         setMessagesCursor(nextCursor);
@@ -1580,9 +2098,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         }
         setMessages(fetchedMessages);
 
-  // Ensure we jump to bottom on initial load (e.g. right after login) and
-  // retry across a few frames so slow-loading media cannot pull us upward.
-  jumpToBottomWithRetries(10, 150);
+        // Ensure we jump to bottom on initial load (e.g. right after login) and
+        // retry across a few frames so slow-loading media cannot pull us upward.
+        jumpToBottomWithRetries(10, 150);
       } catch (err) {
         if (isMounted) {
           setMessages([]);
@@ -1606,14 +2124,14 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   }, [selectedChannel, setAutoScrollOnNextRender, jumpToBottomWithRetries]);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
+    const token = localStorage.getItem("authToken");
     if (!token) {
-      setWsStatus('error');
+      setWsStatus("error");
       return;
     }
 
     let manualClose = false;
-    setWsStatus((status) => (status === 'connected' ? status : 'connecting'));
+    setWsStatus((status) => (status === "connected" ? status : "connecting"));
 
     try {
       const socket = new WebSocket(buildWebSocketURL(token));
@@ -1626,12 +2144,12 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             return;
           }
 
-          if (payload.type === 'session.ready') {
+          if (payload.type === "session.ready") {
             const rawChannelId = payload.data?.channel_id;
             const channelId =
-              typeof rawChannelId === 'number'
+              typeof rawChannelId === "number"
                 ? rawChannelId
-                : typeof rawChannelId === 'string'
+                : typeof rawChannelId === "string"
                   ? Number(rawChannelId)
                   : Number.NaN;
 
@@ -1648,16 +2166,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
               const next: WebRTCSessionState = {
                 ...previous,
-                status: 'connected',
+                status: "connected",
                 error: undefined,
               };
               webrtcSessionRef.current = next;
               selfLeaveSoundPlayedRef.current = false;
               // Play a join sound when we successfully connect our own audio session
               try {
-                notificationSounds.play('join_channel');
+                notificationSounds.play("join_channel");
               } catch (playError) {
-                console.debug('Failed to play join sound', playError);
+                console.debug("Failed to play join sound", playError);
               }
               return next;
             });
@@ -1665,15 +2183,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             return;
           }
 
-          if (payload.type === 'session.error') {
+          if (payload.type === "session.error") {
             const messageField = payload.data?.message as unknown;
             const codeField = payload.data?.code as unknown;
             const description =
-              typeof messageField === 'string' && messageField.trim().length > 0
+              typeof messageField === "string" && messageField.trim().length > 0
                 ? messageField
-                : typeof codeField === 'string' && codeField.trim().length > 0
+                : typeof codeField === "string" && codeField.trim().length > 0
                   ? `Session error: ${codeField}`
-                  : 'Your audio session encountered an issue.';
+                  : "Your audio session encountered an issue.";
 
             pendingWebRTCAuthRef.current = null;
             webrtcSessionRef.current = null;
@@ -1683,27 +2201,76 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             return;
           }
 
-          if (payload.type === 'participant.joined' || payload.type === 'participant.updated') {
+          if (
+            payload.type === "participant.joined" ||
+            payload.type === "participant.updated"
+          ) {
             const data = (payload.data ?? {}) as Record<string, unknown>;
             const rawChannelId = data.channel_id;
             const rawUserId = data.user_id;
 
             const channelId =
-              typeof rawChannelId === 'number'
+              typeof rawChannelId === "number"
                 ? rawChannelId
-                : typeof rawChannelId === 'string'
+                : typeof rawChannelId === "string"
                   ? Number(rawChannelId)
                   : Number.NaN;
             const userId =
-              typeof rawUserId === 'number'
+              typeof rawUserId === "number"
                 ? rawUserId
-                : typeof rawUserId === 'string'
+                : typeof rawUserId === "string"
                   ? Number(rawUserId)
                   : Number.NaN;
 
             if (!Number.isFinite(channelId) || !Number.isFinite(userId)) {
               return;
             }
+
+            const incomingMedia =
+              typeof data.media_state === "object" && data.media_state !== null
+                ? (data.media_state as WebRTCMediaState)
+                : undefined;
+
+            const buildParticipant = (
+              existing?: WebRTCParticipant,
+            ): WebRTCParticipant => ({
+              ...existing,
+              user_id: userId,
+              channel_id: channelId,
+              display_name:
+                typeof data.display_name === "string" &&
+                data.display_name.trim().length > 0
+                  ? (data.display_name as string)
+                  : (existing?.display_name ?? `Member #${userId}`),
+              role:
+                typeof data.role === "string"
+                  ? (data.role as string)
+                  : existing?.role,
+              session_id:
+                typeof data.session_id === "string"
+                  ? (data.session_id as string)
+                  : existing?.session_id,
+              media_state: mergeMediaState(
+                existing?.media_state,
+                incomingMedia,
+              ),
+              last_seen:
+                typeof data.last_seen === "string"
+                  ? (data.last_seen as string)
+                  : existing?.last_seen,
+              username:
+                typeof data.username === "string"
+                  ? (data.username as string)
+                  : existing?.username,
+              avatar:
+                typeof data.avatar === "string"
+                  ? (data.avatar as string)
+                  : (data as { avatar?: unknown }).avatar === null
+                    ? ""
+                    : existing?.avatar,
+            });
+
+            let shouldHydrateProfile = false;
 
             setWebrtcState((previous) => {
               if (!previous || previous.channelId !== channelId) {
@@ -1713,30 +2280,27 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               const baseParticipant =
                 previous.participant.user_id === userId
                   ? previous.participant
-                  : previous.participants.find((participant) => participant.user_id === userId);
+                  : previous.participants.find(
+                      (participant) => participant.user_id === userId,
+                    );
 
-              const incomingMedia =
-                typeof data.media_state === 'object' && data.media_state !== null
-                  ? (data.media_state as WebRTCMediaState)
-                  : undefined;
+              const participant = mergeParticipantWithCache(
+                buildParticipant(baseParticipant),
+              );
+              cacheParticipantProfile(participant);
 
-              const participant: WebRTCParticipant = {
-                ...baseParticipant,
-                user_id: userId,
-                channel_id: channelId,
-                display_name:
-                  typeof data.display_name === 'string' && data.display_name.trim().length > 0
-                    ? (data.display_name as string)
-                    : baseParticipant?.display_name ?? `Member #${userId}`,
-                role: typeof data.role === 'string' ? (data.role as string) : baseParticipant?.role,
-                session_id: typeof data.session_id === 'string' ? (data.session_id as string) : baseParticipant?.session_id,
-                media_state: mergeMediaState(baseParticipant?.media_state, incomingMedia),
-                last_seen: typeof data.last_seen === 'string' ? (data.last_seen as string) : baseParticipant?.last_seen,
-              };
+              if (!participant.username || participant.avatar === undefined) {
+                shouldHydrateProfile = true;
+              }
 
-              const nextParticipants = upsertParticipant(previous.participants, participant);
+              const nextParticipants = upsertParticipant(
+                previous.participants,
+                participant,
+              );
               const isSelf = previous.participant.user_id === userId;
-              const nextSelf = isSelf ? { ...previous.participant, ...participant } : previous.participant;
+              const nextSelf = isSelf
+                ? { ...previous.participant, ...participant }
+                : previous.participant;
 
               const next: WebRTCSessionState = {
                 ...previous,
@@ -1751,63 +2315,60 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             // Update channel participants list for UI
             setChannelParticipants((prev) => {
               const currentParticipants = prev[channelId] || [];
-              const baseParticipant = currentParticipants.find((p) => p.user_id === userId);
-              
-              const incomingMedia =
-                typeof data.media_state === 'object' && data.media_state !== null
-                  ? (data.media_state as WebRTCMediaState)
-                  : undefined;
+              const baseParticipant = currentParticipants.find(
+                (p) => p.user_id === userId,
+              );
 
-              const participant: WebRTCParticipant = {
-                ...baseParticipant,
-                user_id: userId,
-                channel_id: channelId,
-                display_name:
-                  typeof data.display_name === 'string' && data.display_name.trim().length > 0
-                    ? (data.display_name as string)
-                    : baseParticipant?.display_name ?? `Member #${userId}`,
-                role: typeof data.role === 'string' ? (data.role as string) : baseParticipant?.role,
-                session_id: typeof data.session_id === 'string' ? (data.session_id as string) : baseParticipant?.session_id,
-                media_state: mergeMediaState(baseParticipant?.media_state, incomingMedia),
-                last_seen: typeof data.last_seen === 'string' ? (data.last_seen as string) : baseParticipant?.last_seen,
-                username: typeof data.username === 'string' ? (data.username as string) : baseParticipant?.username,
-                avatar: typeof data.avatar === 'string' ? (data.avatar as string) : baseParticipant?.avatar,
-              };
+              const participant = mergeParticipantWithCache(
+                buildParticipant(baseParticipant),
+              );
+              cacheParticipantProfile(participant);
 
-              const updatedParticipants = upsertParticipant(currentParticipants, participant);
+              if (!participant.username || participant.avatar === undefined) {
+                shouldHydrateProfile = true;
+              }
+
+              const updatedParticipants = upsertParticipant(
+                currentParticipants,
+                participant,
+              );
               return {
                 ...prev,
                 [channelId]: updatedParticipants,
               };
             });
 
+            if (shouldHydrateProfile) {
+              void hydrateUserProfiles([userId], channelId);
+            }
+
             const selfId = currentUserIdRef.current;
             if (selfId && selfId !== userId) {
               void getOrCreatePeerConnection(userId);
-              
+
               // Play join sound only when someone else joins (not on updates)
-              if (payload.type === 'participant.joined') {
-                notificationSounds.play('join_channel');
+              if (payload.type === "participant.joined") {
+                notificationSounds.play("join_channel");
               }
             }
             return;
           }
 
-          if (payload.type === 'participant.left') {
+          if (payload.type === "participant.left") {
             const data = (payload.data ?? {}) as Record<string, unknown>;
             const rawChannelId = data.channel_id;
             const rawUserId = data.user_id;
 
             const channelId =
-              typeof rawChannelId === 'number'
+              typeof rawChannelId === "number"
                 ? rawChannelId
-                : typeof rawChannelId === 'string'
+                : typeof rawChannelId === "string"
                   ? Number(rawChannelId)
                   : Number.NaN;
             const userId =
-              typeof rawUserId === 'number'
+              typeof rawUserId === "number"
                 ? rawUserId
-                : typeof rawUserId === 'string'
+                : typeof rawUserId === "string"
                   ? Number(rawUserId)
                   : Number.NaN;
 
@@ -1827,7 +2388,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                 return null;
               }
 
-              const nextParticipants = removeParticipantById(previous.participants, userId);
+              const nextParticipants = removeParticipantById(
+                previous.participants,
+                userId,
+              );
               const next: WebRTCSessionState = {
                 ...previous,
                 participants: nextParticipants,
@@ -1839,7 +2403,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             // Update channel participants list for UI
             setChannelParticipants((prev) => {
               const currentParticipants = prev[channelId] || [];
-              const updatedParticipants = removeParticipantById(currentParticipants, userId);
+              const updatedParticipants = removeParticipantById(
+                currentParticipants,
+                userId,
+              );
               if (updatedParticipants.length === 0) {
                 const { [channelId]: _, ...rest } = prev;
                 return rest;
@@ -1859,28 +2426,30 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               if (!selfLeaveSoundPlayedRef.current) {
                 // Play leave sound when the server kicks us (e.g., disconnect) and we haven't already played locally
                 try {
-                  notificationSounds.play('leave_channel');
+                  notificationSounds.play("leave_channel");
                 } catch (playError) {
-                  console.debug('Failed to play leave sound', playError);
+                  console.debug("Failed to play leave sound", playError);
                 }
               }
               selfLeaveSoundPlayedRef.current = false;
-              setWebrtcError((current) => current ?? 'You left the audio channel.');
+              setWebrtcError(
+                (current) => current ?? "You left the audio channel.",
+              );
             } else {
               // Play leave sound when someone else leaves
               const selfId = currentUserIdRef.current;
               if (selfId && selfId !== userId) {
-                notificationSounds.play('leave_channel');
+                notificationSounds.play("leave_channel");
               }
             }
             return;
           }
 
-          if (payload.type === 'message.created') {
+          if (payload.type === "message.created") {
             const channelId = payload.data?.channel_id;
             const message = payload.data?.message;
 
-            if (typeof channelId !== 'number' || !message) {
+            if (typeof channelId !== "number" || !message) {
               return;
             }
 
@@ -1890,7 +2459,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                 return previous;
               }
 
-              const filtered = existing.filter((entry) => entry.id !== message.user_id);
+              const filtered = existing.filter(
+                (entry) => entry.id !== message.user_id,
+              );
               if (filtered.length === existing.length) {
                 return previous;
               }
@@ -1925,27 +2496,27 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               } else {
                 setUnreadMessageCount((count) => count + 1);
               }
-              
+
               // Play notification sound for messages from other users
               const currentUserId = currentUserIdRef.current;
               if (currentUserId && message.user_id !== currentUserId) {
-                notificationSounds.play('message');
+                notificationSounds.play("message");
               }
             }
 
             return;
           }
 
-          if (payload.type === 'channel.typing') {
+          if (payload.type === "channel.typing") {
             const channelId = payload.data?.channel_id;
             const user = payload.data?.user;
 
-            if (typeof channelId !== 'number' || !user) {
+            if (typeof channelId !== "number" || !user) {
               return;
             }
 
             const typingUserId = user.id;
-            if (typeof typingUserId !== 'number') {
+            if (typeof typingUserId !== "number") {
               return;
             }
 
@@ -1955,11 +2526,20 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             }
 
             const now = Date.now();
-            const name = typeof user.username === 'string' && user.username.trim().length > 0 ? user.username.trim() : 'Someone';
+            const name =
+              typeof user.username === "string" &&
+              user.username.trim().length > 0
+                ? user.username.trim()
+                : "Someone";
             const expiresAtRaw = payload.data?.expires_at;
-            const parsedExpiry = typeof expiresAtRaw === 'string' ? Date.parse(expiresAtRaw) : Number.NaN;
+            const parsedExpiry =
+              typeof expiresAtRaw === "string"
+                ? Date.parse(expiresAtRaw)
+                : Number.NaN;
             const fallbackExpiry = now + TYPING_EVENT_FALLBACK_MS;
-            const expiresAt = Number.isFinite(parsedExpiry) ? Math.max(parsedExpiry, fallbackExpiry) : fallbackExpiry;
+            const expiresAt = Number.isFinite(parsedExpiry)
+              ? Math.max(parsedExpiry, fallbackExpiry)
+              : fallbackExpiry;
 
             if (payload.data?.active === false) {
               setTypingByChannel((previous) => {
@@ -1968,7 +2548,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                   return previous;
                 }
 
-                const filtered = existing.filter((entry) => entry.id !== typingUserId);
+                const filtered = existing.filter(
+                  (entry) => entry.id !== typingUserId,
+                );
                 if (filtered.length === existing.length) {
                   return previous;
                 }
@@ -1985,7 +2567,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
             setTypingByChannel((previous) => {
               const existing = previous[channelId] ?? [];
-              const filtered = existing.filter((entry) => entry.id !== typingUserId && entry.expiresAt > now);
+              const filtered = existing.filter(
+                (entry) => entry.id !== typingUserId && entry.expiresAt > now,
+              );
               const nextEntry: TypingEntry = {
                 id: typingUserId,
                 name,
@@ -2000,7 +2584,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
             return;
           }
 
-          if (payload.type === 'channel.created') {
+          if (payload.type === "channel.created") {
             const createdChannel = payload.data?.channel;
             const serverId = payload.data?.server_id;
 
@@ -2010,60 +2594,63 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
             if (
               selectedServerIdRef.current &&
-              typeof serverId === 'number' &&
+              typeof serverId === "number" &&
               selectedServerIdRef.current !== serverId
             ) {
               return;
             }
 
-              setChannels((previous) => {
-                if (!previous) {
-                  return previous;
-                }
+            setChannels((previous) => {
+              if (!previous) {
+                return previous;
+              }
 
-                const next = normalizeChannelList([...previous, createdChannel]);
+              const next = normalizeChannelList([...previous, createdChannel]);
 
-                if (!selectedChannelIdRef.current && createdChannel.type === 'text') {
-                  setSelectedChannel(createdChannel);
-                }
+              if (
+                !selectedChannelIdRef.current &&
+                createdChannel.type === "text"
+              ) {
+                setSelectedChannel(createdChannel);
+              }
 
-                return next;
-              });
+              return next;
+            });
             return;
           }
-          if (payload.type === 'webrtc.offer') {
+          if (payload.type === "webrtc.offer") {
             const data = (payload.data ?? {}) as Record<string, unknown>;
             void handleIncomingOffer(data);
             return;
           }
 
-          if (payload.type === 'webrtc.answer') {
+          if (payload.type === "webrtc.answer") {
             const data = (payload.data ?? {}) as Record<string, unknown>;
             void handleIncomingAnswer(data);
             return;
           }
 
-          if (payload.type === 'webrtc.ice_candidate') {
+          if (payload.type === "webrtc.ice_candidate") {
             const data = (payload.data ?? {}) as Record<string, unknown>;
             void handleIncomingCandidate(data);
             return;
           }
         } catch (error) {
-          console.warn('Failed to parse websocket payload', error);
+          console.warn("Failed to parse websocket payload", error);
         }
       };
 
       const handleOpen = () => {
-        setWsStatus('connected');
+        setWsStatus("connected");
         clearRetryTimeout();
 
         const activeChannelId = selectedChannelIdRef.current;
         if (activeChannelId) {
           socket.send(
             JSON.stringify({
-              type: 'channel.select',
+              type: "channel.select",
               channel_id: activeChannelId,
-            })
+            }),
           );
         }
 
@@ -2073,7 +2660,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         } else if (pendingWebRTCAuthRef.current) {
           const pending = pendingWebRTCAuthRef.current;
           const sent = sendWebSocketMessage({
-            type: 'session.authenticate',
+            type: "session.authenticate",
             data: {
               session_token: pending.sessionToken,
               channel_id: pending.channelId,
@@ -2094,7 +2681,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           wsRef.current = null;
         }
 
-        setWsStatus('error');
+        setWsStatus("error");
         scheduleReconnect();
       };
 
@@ -2103,27 +2690,27 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           return;
         }
 
-        setWsStatus('error');
+        setWsStatus("error");
         scheduleReconnect();
       };
 
-      socket.addEventListener('open', handleOpen);
-      socket.addEventListener('message', handleMessage);
-      socket.addEventListener('close', handleClose);
-      socket.addEventListener('error', handleError);
+      socket.addEventListener("open", handleOpen);
+      socket.addEventListener("message", handleMessage);
+      socket.addEventListener("close", handleClose);
+      socket.addEventListener("error", handleError);
 
       return () => {
         manualClose = true;
 
-        socket.removeEventListener('open', handleOpen);
-        socket.removeEventListener('message', handleMessage);
-        socket.removeEventListener('close', handleClose);
-        socket.removeEventListener('error', handleError);
+        socket.removeEventListener("open", handleOpen);
+        socket.removeEventListener("message", handleMessage);
+        socket.removeEventListener("close", handleClose);
+        socket.removeEventListener("error", handleError);
 
         try {
           socket.close();
         } catch (closeError) {
-          console.debug('Socket close during cleanup failed', closeError);
+          console.debug("Socket close during cleanup failed", closeError);
         }
 
         if (wsRef.current === socket) {
@@ -2131,11 +2718,17 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         }
       };
     } catch (connectionError) {
-      console.error('Failed to establish websocket connection', connectionError);
-      setWsStatus('error');
+      console.error(
+        "Failed to establish websocket connection",
+        connectionError,
+      );
+      setWsStatus("error");
       scheduleReconnect();
     }
   }, [
+    cacheParticipantProfile,
+    mergeParticipantWithCache,
+    hydrateUserProfiles,
     normalizeChannelList,
     scheduleReconnect,
     clearRetryTimeout,
@@ -2154,14 +2747,14 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
   useEffect(() => {
     const handleOffline = () => {
-      setWsStatus('error');
+      setWsStatus("error");
 
       try {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.close(4001, 'offline');
+          wsRef.current.close(4001, "offline");
         }
       } catch (offlineError) {
-        console.info('Websocket close on offline failed', offlineError);
+        console.info("Websocket close on offline failed", offlineError);
       }
 
       scheduleReconnect();
@@ -2169,16 +2762,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
     const handleOnline = () => {
       clearRetryTimeout();
-      setWsStatus('connecting');
+      setWsStatus("connecting");
       setWsRetryCount((count) => count + 1);
     };
 
-    window.addEventListener('offline', handleOffline);
-    window.addEventListener('online', handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
 
     return () => {
-      window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('online', handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
     };
   }, [clearRetryTimeout, scheduleReconnect]);
 
@@ -2190,24 +2783,30 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
     socket.send(
       JSON.stringify({
-        type: 'channel.select',
+        type: "channel.select",
         channel_id: selectedChannel.id,
-      })
+      }),
     );
   }, [selectedChannel]);
 
-  useEffect(() => () => {
-    if (retryTimeoutRef.current !== null) {
-      window.clearTimeout(retryTimeoutRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (retryTimeoutRef.current !== null) {
+        window.clearTimeout(retryTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
-  useEffect(() => () => {
-    dragCounterRef.current = 0;
-  }, []);
+  useEffect(
+    () => () => {
+      dragCounterRef.current = 0;
+    },
+    [],
+  );
 
   useEffect(() => {
-    if (!selectedChannel || selectedChannel.type !== 'text') {
+    if (!selectedChannel || selectedChannel.type !== "text") {
       return;
     }
     messageInputRef.current?.focus();
@@ -2218,15 +2817,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
 
-  const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
         setPreviewAttachment(null);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [previewAttachment]);
 
@@ -2244,7 +2843,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     const value = event.target.value;
     setMessageInput(value);
 
-    if (!selectedChannel || selectedChannel.type !== 'text') {
+    if (!selectedChannel || selectedChannel.type !== "text") {
       return;
     }
 
@@ -2266,65 +2865,75 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         return;
       }
 
-      if (!selectedChannel || selectedChannel.type !== 'text') {
-        setError('Attachments are only supported in text channels.');
-        window.setTimeout(() => setError(''), 4000);
+      if (!selectedChannel || selectedChannel.type !== "text") {
+        setError("Attachments are only supported in text channels.");
+        window.setTimeout(() => setError(""), 4000);
         return;
       }
 
       const files = Array.from(fileList);
       for (const file of files) {
-        const trackerId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const trackerId =
+          typeof crypto !== "undefined" &&
+          typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-        setUploadQueue((prev) => [...prev, { id: trackerId, name: file.name, status: 'uploading' }]);
+        setUploadQueue((prev) => [
+          ...prev,
+          { id: trackerId, name: file.name, status: "uploading" },
+        ]);
 
-        const contentType = file.type || 'application/octet-stream';
+        const contentType = file.type || "application/octet-stream";
 
         const channelId = selectedChannel.id;
         let createdMessage: Message | null = null;
 
         if (!skipDirectUploadRef.current) {
           try {
-            const signature = await uploadsAPI.createPresignedUpload(channelId, {
-              file_name: file.name,
-              content_type: contentType,
-              file_size: file.size,
-            });
+            const signature = await uploadsAPI.createPresignedUpload(
+              channelId,
+              {
+                file_name: file.name,
+                content_type: contentType,
+                file_size: file.size,
+              },
+            );
 
             const headers = new Headers();
             const signedHeaders = signature.headers ?? {};
             Object.entries(signedHeaders).forEach(([key, value]) => {
               const normalized = key.toLowerCase();
-              if (normalized === 'host' || normalized === 'content-length') {
+              if (normalized === "host" || normalized === "content-length") {
                 return;
               }
-              if (typeof value === 'string' && value.trim().length > 0) {
+              if (typeof value === "string" && value.trim().length > 0) {
                 headers.set(key, value);
               }
             });
 
-            if (!headers.has('Content-Type')) {
-              headers.set('Content-Type', contentType);
+            if (!headers.has("Content-Type")) {
+              headers.set("Content-Type", contentType);
             }
 
             const uploadResponse = await fetch(signature.upload_url, {
-              method: signature.method || 'PUT',
+              method: signature.method || "PUT",
               headers,
               body: file,
-              mode: 'cors',
-              cache: 'no-store',
+              mode: "cors",
+              cache: "no-store",
               keepalive: true,
             });
 
             if (!uploadResponse.ok) {
-              throw new Error(`Upload failed with status ${uploadResponse.status}`);
+              throw new Error(
+                `Upload failed with status ${uploadResponse.status}`,
+              );
             }
 
             const payload = {
-              content: '',
-              type: 'file' as const,
+              content: "",
+              type: "file" as const,
               attachments: [
                 {
                   object_key: signature.object_key,
@@ -2336,28 +2945,42 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               ],
             };
 
-            const response = await channelsAPI.createMessage(channelId, payload);
+            const response = await channelsAPI.createMessage(
+              channelId,
+              payload,
+            );
             createdMessage = response.data.message;
           } catch (uploadError) {
-            console.error('Direct upload failed, switching to fallback upload', uploadError);
+            console.error(
+              "Direct upload failed, switching to fallback upload",
+              uploadError,
+            );
             skipDirectUploadRef.current = true;
           }
         }
 
         if (!createdMessage) {
           try {
-            const fallbackResponse = await uploadsAPI.uploadAttachmentMessage(channelId, file);
+            const fallbackResponse = await uploadsAPI.uploadAttachmentMessage(
+              channelId,
+              file,
+            );
             createdMessage = fallbackResponse.data.message;
           } catch (fallbackError) {
-            console.error('Fallback upload failed', fallbackError);
-            const message = fallbackError instanceof Error ? fallbackError.message : 'Failed to upload file';
+            console.error("Fallback upload failed", fallbackError);
+            const message =
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : "Failed to upload file";
             setUploadQueue((prev) =>
               prev.map((entry) =>
-                entry.id === trackerId ? { ...entry, status: 'error', error: message } : entry
-              )
+                entry.id === trackerId
+                  ? { ...entry, status: "error", error: message }
+                  : entry,
+              ),
             );
             setError(message);
-            window.setTimeout(() => setError(''), 5000);
+            window.setTimeout(() => setError(""), 5000);
             continue;
           }
         }
@@ -2368,7 +2991,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           const willScroll = setAutoScrollOnNextRender();
           let inserted = false;
           setMessages((previous) => {
-            if (previous.some((existing) => existing.id === messageToInsert.id)) {
+            if (
+              previous.some((existing) => existing.id === messageToInsert.id)
+            ) {
               return previous;
             }
             inserted = true;
@@ -2376,7 +3001,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           });
 
           if (inserted) {
-            setMessagesCursor((current) => current ?? messageToInsert.created_at);
+            setMessagesCursor(
+              (current) => current ?? messageToInsert.created_at,
+            );
             if (willScroll) {
               setUnreadMessageCount(0);
             } else {
@@ -2385,26 +3012,30 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
           }
 
           setUploadQueue((prev) =>
-            prev.map((entry) => (entry.id === trackerId ? { ...entry, status: 'success' } : entry))
+            prev.map((entry) =>
+              entry.id === trackerId ? { ...entry, status: "success" } : entry,
+            ),
           );
 
           window.setTimeout(() => {
-            setUploadQueue((prev) => prev.filter((entry) => entry.id !== trackerId));
+            setUploadQueue((prev) =>
+              prev.filter((entry) => entry.id !== trackerId),
+            );
           }, 1800);
 
           messageInputRef.current?.focus();
         }
       }
     },
-    [selectedChannel, setAutoScrollOnNextRender]
+    [selectedChannel, setAutoScrollOnNextRender],
   );
 
   const handleFileInputChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       processFiles(event.target.files);
-      event.target.value = '';
+      event.target.value = "";
     },
-    [processFiles]
+    [processFiles],
   );
 
   const handleOpenFilePicker = useCallback(() => {
@@ -2413,34 +3044,37 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
   const handleDragOver = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
-      if (!selectedChannel || selectedChannel.type !== 'text') {
+      if (!selectedChannel || selectedChannel.type !== "text") {
         return;
       }
       event.preventDefault();
-      event.dataTransfer.dropEffect = 'copy';
+      event.dataTransfer.dropEffect = "copy";
     },
-    [selectedChannel]
+    [selectedChannel],
   );
 
   const handleDragEnter = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
-      if (!selectedChannel || selectedChannel.type !== 'text') {
+      if (!selectedChannel || selectedChannel.type !== "text") {
         return;
       }
       event.preventDefault();
       dragCounterRef.current += 1;
       setIsDragActive(true);
     },
-    [selectedChannel]
+    [selectedChannel],
   );
 
-  const handleDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
-    if (dragCounterRef.current === 0) {
-      setIsDragActive(false);
-    }
-  }, []);
+  const handleDragLeave = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+      if (dragCounterRef.current === 0) {
+        setIsDragActive(false);
+      }
+    },
+    [],
+  );
 
   const handleDrop = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
@@ -2449,7 +3083,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       setIsDragActive(false);
       processFiles(event.dataTransfer?.files ?? null);
     },
-    [processFiles]
+    [processFiles],
   );
 
   const sendMessage = useCallback(async () => {
@@ -2457,7 +3091,11 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
 
-    if (!selectedChannel || selectedChannel.type !== 'text' || wsStatus !== 'connected') {
+    if (
+      !selectedChannel ||
+      selectedChannel.type !== "text" ||
+      wsStatus !== "connected"
+    ) {
       return;
     }
 
@@ -2473,7 +3111,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       setIsSendingMessage(true);
       const response = await channelsAPI.createMessage(selectedChannel.id, {
         content: trimmed,
-        type: 'text',
+        type: "text",
       });
       const newMessage = response.data.message;
 
@@ -2496,10 +3134,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         }
       }
 
-      setMessageInput('');
+      setMessageInput("");
     } catch (err) {
-      setError('Failed to send message. Please try again.');
-      window.setTimeout(() => setError(''), 5000);
+      setError("Failed to send message. Please try again.");
+      window.setTimeout(() => setError(""), 5000);
     } finally {
       setIsSendingMessage(false);
       messageInputRef.current?.focus();
@@ -2518,17 +3156,17 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       event.preventDefault();
       void sendMessage();
     },
-    [sendMessage]
+    [sendMessage],
   );
 
   const handleMessageKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      if (event.key === 'Enter' && !event.shiftKey) {
+      if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         void sendMessage();
       }
     },
-    [sendMessage]
+    [sendMessage],
   );
 
   const openServerActionDialog = useCallback(() => {
@@ -2542,7 +3180,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const handleCreateServer = () => {
     setIsServerActionOpen(false);
     if (navigate) {
-      navigate('/create-server');
+      navigate("/create-server");
     }
   };
 
@@ -2552,21 +3190,24 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
 
   const formatTimestamp = useCallback((value: string) => {
     if (!value) {
-      return '';
+      return "";
     }
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) {
       return value;
     }
-    return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return parsed.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }, []);
 
   const formatFileSize = useCallback((size: number) => {
     if (!Number.isFinite(size) || size <= 0) {
-      return '0 B';
+      return "0 B";
     }
 
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const units = ["B", "KB", "MB", "GB", "TB"];
     let value = size;
     let unitIndex = 0;
 
@@ -2582,39 +3223,51 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     setPreviewAttachment(null);
   }, []);
 
-  const handlePreviewAttachment = useCallback((attachment: MessageAttachment) => {
-    setPreviewAttachment(attachment);
-  }, []);
+  const handlePreviewAttachment = useCallback(
+    (attachment: MessageAttachment) => {
+      setPreviewAttachment(attachment);
+    },
+    [],
+  );
 
   const handleOpenCreateChannel = useCallback(() => {
     if (!selectedServer || !canManageChannels) {
       return;
     }
 
-    setCreateChannelForm({ name: '', description: '', type: 'text' });
-    setCreateChannelError('');
+    setCreateChannelForm({ name: "", description: "", type: "text" });
+    setCreateChannelError("");
     setIsCreateChannelOpen(true);
   }, [selectedServer, canManageChannels]);
 
   const handleCloseCreateChannel = useCallback(() => {
     setIsCreateChannelOpen(false);
-    setCreateChannelError('');
+    setCreateChannelError("");
   }, []);
 
-  const handleCreateChannelNameChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const { value } = event.target;
-    setCreateChannelForm((previous) => ({ ...previous, name: value }));
-  }, []);
+  const handleCreateChannelNameChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const { value } = event.target;
+      setCreateChannelForm((previous) => ({ ...previous, name: value }));
+    },
+    [],
+  );
 
-  const handleCreateChannelDescriptionChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
-    const { value } = event.target;
-    setCreateChannelForm((previous) => ({ ...previous, description: value }));
-  }, []);
+  const handleCreateChannelDescriptionChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      const { value } = event.target;
+      setCreateChannelForm((previous) => ({ ...previous, description: value }));
+    },
+    [],
+  );
 
-  const handleCreateChannelTypeChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
-    const next = event.target.value === 'audio' ? 'audio' : 'text';
-    setCreateChannelForm((previous) => ({ ...previous, type: next }));
-  }, []);
+  const handleCreateChannelTypeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const next = event.target.value === "audio" ? "audio" : "text";
+      setCreateChannelForm((previous) => ({ ...previous, type: next }));
+    },
+    [],
+  );
 
   const handleCreateChannelSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -2628,32 +3281,41 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       const trimmedDescription = createChannelForm.description.trim();
 
       if (!trimmedName) {
-        setCreateChannelError('Channel name is required.');
+        setCreateChannelError("Channel name is required.");
         return;
       }
 
       setIsCreatingChannel(true);
-      setCreateChannelError('');
+      setCreateChannelError("");
 
       try {
         const response = await channelsAPI.createChannel({
           name: trimmedName,
-          description: trimmedDescription.length > 0 ? trimmedDescription : undefined,
+          description:
+            trimmedDescription.length > 0 ? trimmedDescription : undefined,
           type: createChannelForm.type,
           server_id: selectedServer.id,
         });
 
         const newChannel = response.data.channel;
-        setChannels((previous) => normalizeChannelList([...previous, newChannel]));
+        setChannels((previous) =>
+          normalizeChannelList([...previous, newChannel]),
+        );
         setSelectedChannel(newChannel);
         setIsCreateChannelOpen(false);
-        setCreateChannelForm({ name: '', description: '', type: 'text' });
+        setCreateChannelForm({ name: "", description: "", type: "text" });
       } catch (submitError) {
-        let message = 'Failed to create channel';
-        if (typeof submitError === 'object' && submitError !== null && 'response' in submitError) {
-          const responseData = (submitError as {
-            response?: { data?: { error?: string; message?: string } };
-          }).response?.data;
+        let message = "Failed to create channel";
+        if (
+          typeof submitError === "object" &&
+          submitError !== null &&
+          "response" in submitError
+        ) {
+          const responseData = (
+            submitError as {
+              response?: { data?: { error?: string; message?: string } };
+            }
+          ).response?.data;
           message = responseData?.error || responseData?.message || message;
         } else if (submitError instanceof Error) {
           message = submitError.message;
@@ -2664,31 +3326,43 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         setIsCreatingChannel(false);
       }
     },
-    [selectedServer, canManageChannels, createChannelForm, normalizeChannelList]
+    [
+      selectedServer,
+      canManageChannels,
+      createChannelForm,
+      normalizeChannelList,
+    ],
   );
 
   const previewAttachmentIsVideo = Boolean(
-    previewAttachment && (previewAttachment.content_type || '').startsWith('video/')
+    previewAttachment &&
+      (previewAttachment.content_type || "").startsWith("video/"),
   );
 
   const previewAttachmentIsImage = Boolean(
-    previewAttachment && (previewAttachment.content_type || '').startsWith('image/')
+    previewAttachment &&
+      (previewAttachment.content_type || "").startsWith("image/"),
   );
 
   const handleManualReconnect = useCallback(() => {
-    if (wsStatus === 'connected' || wsStatus === 'connecting') {
+    if (wsStatus === "connected" || wsStatus === "connecting") {
       return;
     }
     clearRetryTimeout();
-    setWsStatus('connecting');
+    setWsStatus("connecting");
     setWsRetryCount((count) => count + 1);
   }, [clearRetryTimeout, wsStatus]);
   const fetchOlderMessages = useCallback(async () => {
-    if (!selectedChannel || selectedChannel.type !== 'text') {
+    if (!selectedChannel || selectedChannel.type !== "text") {
       return;
     }
 
-    if (!hasMoreMessages || isLoadingOlderMessages || isLoadingMessages || !messagesCursor) {
+    if (
+      !hasMoreMessages ||
+      isLoadingOlderMessages ||
+      isLoadingMessages ||
+      !messagesCursor
+    ) {
       return;
     }
 
@@ -2711,7 +3385,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       const fetchedMessages = result?.messages ?? [];
       if (fetchedMessages.length > 0) {
         setMessages((previous) => [...fetchedMessages, ...previous]);
-        const nextCursor = result?.next_cursor ?? fetchedMessages[0]?.created_at ?? messagesCursor;
+        const nextCursor =
+          result?.next_cursor ??
+          fetchedMessages[0]?.created_at ??
+          messagesCursor;
         setMessagesCursor(nextCursor);
         setHasMoreMessages(result?.has_more ?? false);
       } else {
@@ -2719,12 +3396,18 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         isPrependingRef.current = false;
       }
     } catch (error) {
-      console.error('Failed to load older messages', error);
+      console.error("Failed to load older messages", error);
       isPrependingRef.current = false;
     } finally {
       setIsLoadingOlderMessages(false);
     }
-  }, [selectedChannel, hasMoreMessages, isLoadingOlderMessages, isLoadingMessages, messagesCursor]);
+  }, [
+    selectedChannel,
+    hasMoreMessages,
+    isLoadingOlderMessages,
+    isLoadingMessages,
+    messagesCursor,
+  ]);
 
   useEffect(() => {
     const container = messageListRef.current;
@@ -2749,7 +3432,8 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         fetchOlderMessages();
       }
 
-      const distanceFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+      const distanceFromBottom =
+        container.scrollHeight - container.clientHeight - container.scrollTop;
       if (distanceFromBottom <= 160) {
         setUnreadMessageCount(0);
       }
@@ -2760,27 +3444,27 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       }
     };
 
-    container.addEventListener('scroll', handleScroll);
+    container.addEventListener("scroll", handleScroll);
 
     return () => {
-      container.removeEventListener('scroll', handleScroll);
+      container.removeEventListener("scroll", handleScroll);
     };
   }, [fetchOlderMessages]);
 
   const typingIndicatorMessage = useMemo(() => {
     if (!selectedChannel) {
-      return '';
+      return "";
     }
 
     const entries = typingByChannel[selectedChannel.id] ?? [];
     if (entries.length === 0) {
-      return '';
+      return "";
     }
 
     const now = Date.now();
     const active = entries.filter((entry) => entry.expiresAt > now);
     if (active.length === 0) {
-      return '';
+      return "";
     }
 
     active.sort((a, b) => a.expiresAt - b.expiresAt);
@@ -2793,12 +3477,12 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         continue;
       }
       seen.add(entry.id);
-      const label = entry.name.trim() || 'Someone';
+      const label = entry.name.trim() || "Someone";
       names.push(label);
     }
 
     if (names.length === 0) {
-      return '';
+      return "";
     }
 
     if (names.length === 1) {
@@ -2810,7 +3494,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     }
 
     const remaining = names.length - 2;
-    const suffix = remaining === 1 ? 'other' : 'others';
+    const suffix = remaining === 1 ? "other" : "others";
     return `${names[0]}, ${names[1]}, and ${remaining} ${suffix} are typing…`;
   }, [selectedChannel, typingByChannel]);
 
@@ -2839,15 +3523,16 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     }> = [];
 
     filteredMessages.forEach((msg) => {
-      const username = msg.user?.username?.trim() || 'Member';
+      const username = msg.user?.username?.trim() || "Member";
       const avatar = msg.user?.avatar ?? null;
       const userId = msg.user_id ?? null;
-      const initials = username
-        .split(' ')
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((part) => part[0]?.toUpperCase())
-        .join('') || 'U';
+      const initials =
+        username
+          .split(" ")
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((part) => part[0]?.toUpperCase())
+          .join("") || "U";
 
       const lastGroup = groups[groups.length - 1];
       const sameAuthor =
@@ -2861,7 +3546,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       }
 
       groups.push({
-        key: `${msg.id}-${userId ?? 'anon'}`,
+        key: `${msg.id}-${userId ?? "anon"}`,
         userId,
         username,
         avatar,
@@ -2879,7 +3564,10 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return [] as WebRTCParticipant[];
     }
 
-    return normalizeParticipantRoster([webrtcState.participant, ...webrtcState.participants]);
+    return normalizeParticipantRoster([
+      webrtcState.participant,
+      ...webrtcState.participants,
+    ]);
   }, [webrtcState]);
 
   const activeAudioChannel = useMemo(() => {
@@ -2887,7 +3575,9 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return null;
     }
 
-    return channels.find((channel) => channel.id === webrtcState.channelId) ?? null;
+    return (
+      channels.find((channel) => channel.id === webrtcState.channelId) ?? null
+    );
   }, [channels, webrtcState]);
 
   useEffect(() => {
@@ -2896,25 +3586,30 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       return;
     }
 
-    const normalized = mergeMediaState(DEFAULT_MEDIA_STATE, webrtcState.participant.media_state);
+    const normalized = mergeMediaState(
+      DEFAULT_MEDIA_STATE,
+      webrtcState.participant.media_state,
+    );
     updateLocalMediaState(normalized, { broadcast: false });
   }, [updateLocalMediaState, webrtcState]);
 
   useEffect(() => {
-    if (!webrtcState || webrtcState.status !== 'connected') {
+    if (!webrtcState || webrtcState.status !== "connected") {
       return;
     }
 
     let cancelled = false;
 
     const prepareLocalMedia = async () => {
-      const stream = await ensureLocalMedia({ video: localMediaState.camera === 'on' });
+      const stream = await ensureLocalMedia({
+        video: localMediaState.camera === "on",
+      });
       if (!stream || cancelled) {
         return;
       }
 
       stream.getAudioTracks().forEach((track) => {
-        track.enabled = localMediaState.mic === 'on';
+        track.enabled = localMediaState.mic === "on";
       });
 
       const previewElement = localPreviewRef.current;
@@ -2929,7 +3624,12 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     return () => {
       cancelled = true;
     };
-  }, [ensureLocalMedia, localMediaState.camera, localMediaState.mic, webrtcState]);
+  }, [
+    ensureLocalMedia,
+    localMediaState.camera,
+    localMediaState.mic,
+    webrtcState,
+  ]);
 
   useEffect(() => {
     remoteMediaElementsRef.current.forEach((element, userId) => {
@@ -2970,12 +3670,12 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         element.srcObject = stream;
       }
 
-  element.autoplay = true;
+      element.autoplay = true;
       element.muted = false;
       element.volume = 1;
 
       const playResult = element.play();
-      if (playResult && typeof playResult.catch === 'function') {
+      if (playResult && typeof playResult.catch === "function") {
         void playResult.catch(() => undefined);
       }
     });
@@ -3004,7 +3704,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   }, [localMediaState.camera, localMediaState.mic]);
 
   useEffect(() => {
-    if (!webrtcState || webrtcState.status !== 'connected') {
+    if (!webrtcState || webrtcState.status !== "connected") {
       return;
     }
 
@@ -3045,7 +3745,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   useEffect(() => {
     const container = messageListRef.current;
     const content = messageListContentRef.current;
-    if (!container || typeof ResizeObserver === 'undefined') {
+    if (!container || typeof ResizeObserver === "undefined") {
       return;
     }
 
@@ -3092,227 +3792,239 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       jumpToBottomWithRetries(8, 140);
     };
 
-    container.addEventListener('load', handleMediaLoad, true);
+    container.addEventListener("load", handleMediaLoad, true);
 
     return () => {
-      container.removeEventListener('load', handleMediaLoad, true);
+      container.removeEventListener("load", handleMediaLoad, true);
     };
   }, [ensurePinnedToBottom, jumpToBottomWithRetries]);
 
   const webrtcStatusLabel = useMemo(() => {
     if (!webrtcState) {
-      return 'Not connected';
+      return "Not connected";
     }
 
     switch (webrtcState.status) {
-      case 'connected':
-        return 'Connected';
-      case 'authenticating':
-        return 'Joining…';
-      case 'error':
-        return 'Error';
+      case "connected":
+        return "Connected";
+      case "authenticating":
+        return "Joining…";
+      case "error":
+        return "Error";
       default:
-        return 'Not connected';
+        return "Not connected";
     }
   }, [webrtcState]);
   const isCurrentAudioSession = Boolean(
-    webrtcState && selectedChannel && webrtcState.channelId === selectedChannel.id
+    webrtcState &&
+      selectedChannel &&
+      webrtcState.channelId === selectedChannel.id,
   );
-  const showJoinAudioButton = !isCurrentAudioSession || webrtcState?.status === 'error';
-  const joinAudioDisabled = isJoiningWebRTC || webrtcState?.status === 'authenticating';
-  const audioControlsDisabled = !webrtcState || webrtcState.status !== 'connected' || isJoiningWebRTC;
-  const audioSessionName = activeAudioChannel?.name ?? (webrtcState ? `Channel ${webrtcState.channelId}` : 'No audio session');
-  const audioSessionPrefix = activeAudioChannel?.type === 'audio' || activeAudioChannel === null ? '🎧' : '#';
+  const showJoinAudioButton =
+    !isCurrentAudioSession || webrtcState?.status === "error";
+  const joinAudioDisabled =
+    isJoiningWebRTC || webrtcState?.status === "authenticating";
+  const audioControlsDisabled =
+    !webrtcState || webrtcState.status !== "connected" || isJoiningWebRTC;
+  const audioSessionName =
+    activeAudioChannel?.name ??
+    (webrtcState ? `Channel ${webrtcState.channelId}` : "No audio session");
+  const audioSessionPrefix =
+    activeAudioChannel?.type === "audio" || activeAudioChannel === null
+      ? "🎧"
+      : "#";
   const audioParticipantCount = audioParticipants.length;
-  const audioParticipantLabel = audioParticipantCount === 1 ? 'participant' : 'participants';
-  const isAudioSessionConnected = webrtcState?.status === 'connected';
+  const audioParticipantLabel =
+    audioParticipantCount === 1 ? "participant" : "participants";
+  const isAudioSessionConnected = webrtcState?.status === "connected";
   const audioIndicatorClasses = isAudioSessionConnected
-    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100 shadow-lg shadow-emerald-500/10'
-    : 'border-slate-800/70 bg-slate-900/70 text-slate-200';
+    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100 shadow-lg shadow-emerald-500/10"
+    : "border-slate-800/70 bg-slate-900/70 text-slate-200";
   const audioStatusBadgeClass = (() => {
-    if (webrtcState?.status === 'connected') {
-      return 'bg-emerald-500/20 text-emerald-100';
+    if (webrtcState?.status === "connected") {
+      return "bg-emerald-500/20 text-emerald-100";
     }
 
-    if (webrtcState?.status === 'authenticating') {
-      return 'bg-amber-500/20 text-amber-100';
+    if (webrtcState?.status === "authenticating") {
+      return "bg-amber-500/20 text-amber-100";
     }
 
-    if (webrtcState?.status === 'error') {
-      return 'bg-red-500/20 text-red-200';
+    if (webrtcState?.status === "error") {
+      return "bg-red-500/20 text-red-200";
     }
 
-    return 'bg-slate-800 text-slate-300';
+    return "bg-slate-800 text-slate-300";
   })();
   const audioSessionInfoText = (() => {
     if (!webrtcState) {
-      return 'Join an audio channel to start a live conversation.';
+      return "Join an audio channel to start a live conversation.";
     }
 
     switch (webrtcState.status) {
-      case 'connected':
+      case "connected":
         return `${audioParticipantCount} ${audioParticipantLabel} in session`;
-      case 'authenticating':
-        return 'Connecting to audio channel…';
-      case 'error':
-        return 'We hit a snag joining this room. Try rejoining from the channel list.';
+      case "authenticating":
+        return "Connecting to audio channel…";
+      case "error":
+        return "We hit a snag joining this room. Try rejoining from the channel list.";
       default:
-        return 'Join an audio channel to start a live conversation.';
+        return "Join an audio channel to start a live conversation.";
     }
   })();
 
-  const canSendMessages = Boolean(selectedChannel && selectedChannel.type === 'text');
+  const canSendMessages = Boolean(
+    selectedChannel && selectedChannel.type === "text",
+  );
   const messagePlaceholder = selectedChannel
     ? `Message #${selectedChannel.name} (Markdown supported)`
-    : 'Select a channel to chat';
-  const showConnectionOverlay = wsStatus !== 'connected';
+    : "Select a channel to chat";
+  const showConnectionOverlay = wsStatus !== "connected";
 
   const overlayCopy = useMemo(() => {
     switch (wsStatus) {
-      case 'connecting':
+      case "connecting":
         return {
-          title: 'Connecting to live updates…',
-          body: 'Hang tight while we establish a realtime link to your workspace.',
+          title: "Connecting to live updates…",
+          body: "Hang tight while we establish a realtime link to your workspace.",
         };
-      case 'error':
+      case "error":
         return {
-          title: 'Realtime connection lost',
-          body: 'We’re retrying every 10 seconds. You can retry manually if you need to jump back in sooner.',
+          title: "Realtime connection lost",
+          body: "We’re retrying every 10 seconds. You can retry manually if you need to jump back in sooner.",
         };
-      case 'idle':
+      case "idle":
       default:
         return {
-          title: 'Preparing realtime session…',
-          body: 'Setting up the websocket bridge so messages arrive instantly.',
+          title: "Preparing realtime session…",
+          body: "Setting up the websocket bridge so messages arrive instantly.",
         };
     }
   }, [wsStatus]);
 
   const spinnerStateClass = useMemo(() => {
-    if (wsStatus === 'connecting') {
-      return 'border-t-transparent animate-spin';
+    if (wsStatus === "connecting") {
+      return "border-t-transparent animate-spin";
     }
 
-    if (wsStatus === 'error') {
-      return 'border-dashed animate-pulse';
+    if (wsStatus === "error") {
+      return "border-dashed animate-pulse";
     }
 
-    return 'animate-pulse';
+    return "animate-pulse";
   }, [wsStatus]);
 
-    return {
-      state: {
-        servers,
-        selectedServer,
-        channels,
-        selectedChannel,
-        messages,
-        hasMoreMessages,
-        messagesCursor,
-        isLoadingOlderMessages,
-        unreadMessageCount,
-        messageInput,
-        isServerActionOpen,
-        isLoadingServers,
-        isLoadingChannels,
-        isLoadingMessages,
-        isSendingMessage,
-        error,
-        wsStatus,
-        wsRetryCount,
-        uploadQueue,
-        isDragActive,
-        previewAttachment,
-        composerMaxHeight,
-        currentUser,
-        typingByChannel,
-        isCreateChannelOpen,
-        isCreatingChannel,
-        createChannelError,
-        createChannelForm,
-        webrtcState,
-        isJoiningWebRTC,
-        webrtcError,
-        localMediaState,
-        remoteMediaStreams,
-        mediaPermissionError,
-        channelParticipants,
-      },
-      derived: {
-        canManageChannels,
-        typingIndicatorMessage,
-        filteredMessages,
-        groupedMessages,
-        audioParticipants,
-        activeAudioChannel,
-        previewAttachmentIsVideo,
-        previewAttachmentIsImage,
-        showJoinAudioButton,
-        joinAudioDisabled,
-        audioControlsDisabled,
-        audioSessionName,
-        audioSessionPrefix,
-        audioParticipantCount,
-        audioParticipantLabel,
-        isAudioSessionConnected,
-        audioIndicatorClasses,
-        audioStatusBadgeClass,
-        audioSessionInfoText,
-        canSendMessages,
-        messagePlaceholder,
-        showConnectionOverlay,
-        overlayCopy,
-        spinnerStateClass,
-        webrtcStatusLabel,
-      },
-      refs: {
-        messageInputRef,
-        messageListRef,
-        messageListContentRef,
-        fileInputRef,
-        localPreviewRef,
-        localMediaStreamRef,
-        remoteMediaElementsRef,
-        remoteAudioElementsRef,
-      },
-      actions: {
-        handleServerSelect,
-        handleChannelSelect,
-        handleMessageChange,
-        handleMessageBlur,
-        handleMessageKeyDown,
-        handleSendMessage,
-        handleOpenFilePicker,
-        handleFileInputChange,
-        handleDragOver,
-        handleDragEnter,
-        handleDragLeave,
-        handleDrop,
-        handleManualReconnect,
-        handleJumpToBottom,
-        handleToggleMic,
-        handleToggleCamera,
-        handleJoinAudioChannel,
-        handleLeaveAudioChannel,
-        handleCreateServer,
-        handleJoinServer,
-        handleClosePreview,
-        handlePreviewAttachment,
-        handleOpenCreateChannel,
-        handleCloseCreateChannel,
-        handleCreateChannelNameChange,
-        handleCreateChannelDescriptionChange,
-        handleCreateChannelTypeChange,
-        handleCreateChannelSubmit,
-        openServerActionDialog,
-        closeServerActionDialog,
-      },
-      utils: {
-        formatTimestamp,
-        formatFileSize,
-        mergeMediaState,
-        DEFAULT_MEDIA_STATE,
-      },
-    };
+  return {
+    state: {
+      servers,
+      selectedServer,
+      channels,
+      selectedChannel,
+      messages,
+      hasMoreMessages,
+      messagesCursor,
+      isLoadingOlderMessages,
+      unreadMessageCount,
+      messageInput,
+      isServerActionOpen,
+      isLoadingServers,
+      isLoadingChannels,
+      isLoadingMessages,
+      isSendingMessage,
+      error,
+      wsStatus,
+      wsRetryCount,
+      uploadQueue,
+      isDragActive,
+      previewAttachment,
+      composerMaxHeight,
+      currentUser,
+      typingByChannel,
+      isCreateChannelOpen,
+      isCreatingChannel,
+      createChannelError,
+      createChannelForm,
+      webrtcState,
+      isJoiningWebRTC,
+      webrtcError,
+      localMediaState,
+      remoteMediaStreams,
+      mediaPermissionError,
+      channelParticipants,
+    },
+    derived: {
+      canManageChannels,
+      typingIndicatorMessage,
+      filteredMessages,
+      groupedMessages,
+      audioParticipants,
+      activeAudioChannel,
+      previewAttachmentIsVideo,
+      previewAttachmentIsImage,
+      showJoinAudioButton,
+      joinAudioDisabled,
+      audioControlsDisabled,
+      audioSessionName,
+      audioSessionPrefix,
+      audioParticipantCount,
+      audioParticipantLabel,
+      isAudioSessionConnected,
+      audioIndicatorClasses,
+      audioStatusBadgeClass,
+      audioSessionInfoText,
+      canSendMessages,
+      messagePlaceholder,
+      showConnectionOverlay,
+      overlayCopy,
+      spinnerStateClass,
+      webrtcStatusLabel,
+    },
+    refs: {
+      messageInputRef,
+      messageListRef,
+      messageListContentRef,
+      fileInputRef,
+      localPreviewRef,
+      localMediaStreamRef,
+      remoteMediaElementsRef,
+      remoteAudioElementsRef,
+    },
+    actions: {
+      handleServerSelect,
+      handleChannelSelect,
+      handleMessageChange,
+      handleMessageBlur,
+      handleMessageKeyDown,
+      handleSendMessage,
+      handleOpenFilePicker,
+      handleFileInputChange,
+      handleDragOver,
+      handleDragEnter,
+      handleDragLeave,
+      handleDrop,
+      handleManualReconnect,
+      handleJumpToBottom,
+      handleToggleMic,
+      handleToggleCamera,
+      handleJoinAudioChannel,
+      handleLeaveAudioChannel,
+      handleCreateServer,
+      handleJoinServer,
+      handleClosePreview,
+      handlePreviewAttachment,
+      handleOpenCreateChannel,
+      handleCloseCreateChannel,
+      handleCreateChannelNameChange,
+      handleCreateChannelDescriptionChange,
+      handleCreateChannelTypeChange,
+      handleCreateChannelSubmit,
+      openServerActionDialog,
+      closeServerActionDialog,
+    },
+    utils: {
+      formatTimestamp,
+      formatFileSize,
+      mergeMediaState,
+      DEFAULT_MEDIA_STATE,
+    },
   };
-
+};

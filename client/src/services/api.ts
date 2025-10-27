@@ -1,4 +1,4 @@
-import axios, { InternalAxiosRequestConfig } from 'axios';
+import axios, { InternalAxiosRequestConfig } from "axios";
 import {
   LoginRequest,
   RegisterRequest,
@@ -26,11 +26,12 @@ import {
   PresignAvatarUploadRequest,
   PresignAvatarUploadResponse,
   SetAvatarRequest,
-} from '../types/index';
+  UserSummary,
+} from "../types/index";
 
 // Default to a relative path so production builds don't accidentally call localhost.
 // Set REACT_APP_API_URL at build time when the API lives on another host.
-export const API_BASE_URL = process.env.REACT_APP_API_URL || '/api/v1';
+export const API_BASE_URL = process.env.REACT_APP_API_URL || "/api/v1";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -38,7 +39,7 @@ const api = axios.create({
 
 // Add auth token to requests if available
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const token = localStorage.getItem('authToken');
+  const token = localStorage.getItem("authToken");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -48,29 +49,32 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 // Auth API
 export const authAPI = {
   login: async (credentials: LoginRequest): Promise<AuthResponse> => {
-    const response = await api.post<AuthResponse>('/auth/login', credentials);
+    const response = await api.post<AuthResponse>("/auth/login", credentials);
     return response.data;
   },
 
   register: async (userData: RegisterRequest): Promise<RegisterResponse> => {
-    const response = await api.post<RegisterResponse>('/auth/register', userData);
+    const response = await api.post<RegisterResponse>(
+      "/auth/register",
+      userData,
+    );
     return response.data;
   },
 
   logout: async () => {
-    const response = await api.post('/auth/logout');
+    const response = await api.post("/auth/logout");
     return response.data;
   },
 
   verifyEmail: async (token: string): Promise<VerifyEmailResponse> => {
-    const response = await api.get<VerifyEmailResponse>('/auth/verify-email', {
+    const response = await api.get<VerifyEmailResponse>("/auth/verify-email", {
       params: { token },
     });
     return response.data;
   },
 
   getCurrentUser: async (): Promise<User> => {
-    const response = await api.get<{ data: { user: User } }>('/users/me');
+    const response = await api.get<{ data: { user: User } }>("/users/me");
     return response.data.data.user;
   },
 };
@@ -78,12 +82,14 @@ export const authAPI = {
 // Servers API
 export const serversAPI = {
   getServers: async (): Promise<{ servers: Server[] }> => {
-    const response = await api.get<{ data: { servers: Server[] } }>('/servers');
+    const response = await api.get<{ data: { servers: Server[] } }>("/servers");
     return response.data.data;
   },
 
-  createServer: async (payload: CreateServerRequest): Promise<CreateServerResponse> => {
-    const response = await api.post<CreateServerResponse>('/servers', payload);
+  createServer: async (
+    payload: CreateServerRequest,
+  ): Promise<CreateServerResponse> => {
+    const response = await api.post<CreateServerResponse>("/servers", payload);
     return response.data;
   },
 
@@ -92,9 +98,28 @@ export const serversAPI = {
     return response.data;
   },
 
-  getChannelParticipants: async (serverId: number): Promise<{ [channelId: string]: WebRTCParticipant[] }> => {
-    const response = await api.get<{ data: { [channelId: string]: WebRTCParticipant[] } }>(`/servers/${serverId}/participants`);
+  getChannelParticipants: async (
+    serverId: number,
+  ): Promise<{ [channelId: string]: WebRTCParticipant[] }> => {
+    const response = await api.get<{
+      data: { [channelId: string]: WebRTCParticipant[] };
+    }>(`/servers/${serverId}/participants`);
     return response.data.data;
+  },
+};
+
+export const usersAPI = {
+  lookupUsers: async (userIds: number[]): Promise<UserSummary[]> => {
+    if (!userIds || userIds.length === 0) {
+      return [];
+    }
+
+    const response = await api.post<{ data: { users: UserSummary[] } }>(
+      "/users/lookup",
+      { user_ids: userIds },
+    );
+
+    return response.data.data.users;
   },
 };
 
@@ -105,13 +130,23 @@ export const invitesAPI = {
   },
   createInvite: async (
     serverId: number,
-    payload: { expires_in_hours?: number; max_uses?: number; emails?: string[]; message?: string }
+    payload: {
+      expires_in_hours?: number;
+      max_uses?: number;
+      emails?: string[];
+      message?: string;
+    },
   ): Promise<CreateInviteResponse> => {
-    const response = await api.post<CreateInviteResponse>(`/servers/${serverId}/invites`, payload);
+    const response = await api.post<CreateInviteResponse>(
+      `/servers/${serverId}/invites`,
+      payload,
+    );
     return response.data;
   },
   acceptInvite: async (code: string): Promise<AcceptInviteResponse> => {
-    const response = await api.post<AcceptInviteResponse>(`/invites/${code}/accept`);
+    const response = await api.post<AcceptInviteResponse>(
+      `/invites/${code}/accept`,
+    );
     return response.data;
   },
 };
@@ -119,49 +154,78 @@ export const invitesAPI = {
 // Channels API
 export const channelsAPI = {
   getChannels: async (serverId: number): Promise<Channel[]> => {
-    const response = await api.get<{ data: { channels: Channel[] } }>(`/servers/${serverId}/channels`);
+    const response = await api.get<{ data: { channels: Channel[] } }>(
+      `/servers/${serverId}/channels`,
+    );
     return response.data.data.channels;
   },
 
-  createChannel: async (payload: CreateChannelRequest): Promise<CreateChannelResponse> => {
-    const response = await api.post<CreateChannelResponse>('/channels', payload);
+  createChannel: async (
+    payload: CreateChannelRequest,
+  ): Promise<CreateChannelResponse> => {
+    const response = await api.post<CreateChannelResponse>(
+      "/channels",
+      payload,
+    );
     return response.data;
   },
 
-  getMessages: async (channelId: number, params?: GetMessagesParams): Promise<GetMessagesResponse> => {
-    const response = await api.get<{ data: GetMessagesResponse }>(`/channels/${channelId}/messages`, {
-      params,
-    });
+  getMessages: async (
+    channelId: number,
+    params?: GetMessagesParams,
+  ): Promise<GetMessagesResponse> => {
+    const response = await api.get<{ data: GetMessagesResponse }>(
+      `/channels/${channelId}/messages`,
+      {
+        params,
+      },
+    );
     return response.data.data;
   },
 
-  createMessage: async (channelId: number, payload: CreateMessageRequest): Promise<CreateMessageResponse> => {
-    const response = await api.post<CreateMessageResponse>(`/channels/${channelId}/messages`, payload);
+  createMessage: async (
+    channelId: number,
+    payload: CreateMessageRequest,
+  ): Promise<CreateMessageResponse> => {
+    const response = await api.post<CreateMessageResponse>(
+      `/channels/${channelId}/messages`,
+      payload,
+    );
     return response.data;
   },
 
-  sendTypingIndicator: async (channelId: number, active = true): Promise<void> => {
+  sendTypingIndicator: async (
+    channelId: number,
+    active = true,
+  ): Promise<void> => {
     await api.post(`/channels/${channelId}/typing`, { active });
   },
 
   joinWebRTC: async (channelId: number): Promise<JoinWebRTCResponse> => {
-    const response = await api.post<{ data: JoinWebRTCResponse }>(`/channels/${channelId}/webrtc/join`);
+    const response = await api.post<{ data: JoinWebRTCResponse }>(
+      `/channels/${channelId}/webrtc/join`,
+    );
     return response.data.data;
   },
 
-  leaveWebRTC: async (channelId: number, sessionToken: string): Promise<void> => {
-    await api.post(`/channels/${channelId}/webrtc/leave`, { session_token: sessionToken });
+  leaveWebRTC: async (
+    channelId: number,
+    sessionToken: string,
+  ): Promise<void> => {
+    await api.post(`/channels/${channelId}/webrtc/leave`, {
+      session_token: sessionToken,
+    });
   },
 };
 
 export const uploadsAPI = {
   createPresignedUpload: async (
     channelId: number,
-    payload: CreateAttachmentUploadRequest
+    payload: CreateAttachmentUploadRequest,
   ): Promise<CreateAttachmentUploadResponse> => {
     const response = await api.post<{ data: CreateAttachmentUploadResponse }>(
       `/channels/${channelId}/attachments/presign`,
-      payload
+      payload,
     );
     return response.data.data;
   },
@@ -169,17 +233,17 @@ export const uploadsAPI = {
   uploadAttachmentMessage: async (
     channelId: number,
     file: File,
-    content?: string
+    content?: string,
   ): Promise<CreateMessageResponse> => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
     if (content && content.trim().length > 0) {
-      formData.append('content', content);
+      formData.append("content", content);
     }
 
     const response = await api.post<CreateMessageResponse>(
       `/channels/${channelId}/messages/attachments`,
-      formData
+      formData,
     );
     return response.data;
   },
@@ -190,120 +254,148 @@ export const buildWebSocketURL = (token: string): string => {
   try {
     if (explicit) {
       const parsed = new URL(explicit);
-      parsed.searchParams.set('token', token);
+      parsed.searchParams.set("token", token);
       return parsed.toString();
     }
 
     const base = new URL(API_BASE_URL);
-    base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+    base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
 
     let path = base.pathname;
-    if (path.endsWith('/')) {
+    if (path.endsWith("/")) {
       path = path.slice(0, -1);
     }
 
-    if (path === '' || path === '/') {
-      base.pathname = '/ws';
-    } else if (path.endsWith('/api/v1')) {
-      base.pathname = path.replace(/\/api\/v1$/, '/ws');
+    if (path === "" || path === "/") {
+      base.pathname = "/ws";
+    } else if (path.endsWith("/api/v1")) {
+      base.pathname = path.replace(/\/api\/v1$/, "/ws");
     } else {
       base.pathname = `${path}/ws`;
     }
 
-    base.search = '';
-    base.searchParams.set('token', token);
+    base.search = "";
+    base.searchParams.set("token", token);
 
     return base.toString();
   } catch (error) {
-    console.warn('Failed to build websocket URL, falling back to default.', error);
+    console.warn(
+      "Failed to build websocket URL, falling back to default.",
+      error,
+    );
     return `ws://localhost:8080/ws?token=${encodeURIComponent(token)}`;
   }
 };
 
 // Avatars API
 export const avatarsAPI = {
-  presignUserAvatarUpload: async (request: PresignAvatarUploadRequest): Promise<PresignAvatarUploadResponse> => {
-    const response = await api.post<{ data: PresignAvatarUploadResponse }>('/users/me/avatar/presign', request);
+  presignUserAvatarUpload: async (
+    request: PresignAvatarUploadRequest,
+  ): Promise<PresignAvatarUploadResponse> => {
+    const response = await api.post<{ data: PresignAvatarUploadResponse }>(
+      "/users/me/avatar/presign",
+      request,
+    );
     return response.data.data;
   },
 
   // Upload avatar directly (multipart/form-data). Accepts file and optional crop_data JSON string.
   uploadUserAvatar: async (file: File, cropData?: unknown): Promise<User> => {
     const form = new FormData();
-    form.append('file', file, file.name);
+    form.append("file", file, file.name);
     if (cropData) {
-      form.append('crop_data', JSON.stringify(cropData));
+      form.append("crop_data", JSON.stringify(cropData));
     }
 
-    const response = await api.post<{ message: string; data: { user: User } }>('/users/me/avatar', form, {
-      headers: {
-        // Let axios set the multipart boundary automatically.
-        'Content-Type': 'multipart/form-data',
+    const response = await api.post<{ message: string; data: { user: User } }>(
+      "/users/me/avatar",
+      form,
+      {
+        headers: {
+          // Let axios set the multipart boundary automatically.
+          "Content-Type": "multipart/form-data",
+        },
       },
-    });
+    );
 
     return response.data.data.user;
   },
 
   setUserAvatar: async (request: SetAvatarRequest): Promise<User> => {
-    const response = await api.post<{ message: string; data: { user: User } }>('/users/me/avatar', request);
+    const response = await api.post<{ message: string; data: { user: User } }>(
+      "/users/me/avatar",
+      request,
+    );
     return response.data.data.user;
   },
 
   deleteUserAvatar: async (): Promise<User> => {
-    const response = await api.delete<{ message: string; data: { user: User } }>('/users/me/avatar');
+    const response = await api.delete<{
+      message: string;
+      data: { user: User };
+    }>("/users/me/avatar");
     return response.data.data.user;
   },
 
   presignServerAvatarUpload: async (
     serverId: number,
-    request: PresignAvatarUploadRequest
+    request: PresignAvatarUploadRequest,
   ): Promise<PresignAvatarUploadResponse> => {
     const response = await api.post<{ data: PresignAvatarUploadResponse }>(
       `/servers/${serverId}/avatar/presign`,
-      request
+      request,
     );
     return response.data.data;
   },
 
-  setServerAvatar: async (serverId: number, request: SetAvatarRequest): Promise<Server> => {
-    const response = await api.post<{ message: string; data: { server: Server } }>(
-      `/servers/${serverId}/avatar`,
-      request
-    );
+  setServerAvatar: async (
+    serverId: number,
+    request: SetAvatarRequest,
+  ): Promise<Server> => {
+    const response = await api.post<{
+      message: string;
+      data: { server: Server };
+    }>(`/servers/${serverId}/avatar`, request);
     return response.data.data.server;
   },
 
   deleteServerAvatar: async (serverId: number): Promise<Server> => {
-    const response = await api.delete<{ message: string; data: { server: Server } }>(`/servers/${serverId}/avatar`);
+    const response = await api.delete<{
+      message: string;
+      data: { server: Server };
+    }>(`/servers/${serverId}/avatar`);
     return response.data.data.server;
   },
 
-  uploadFile: async (url: string, file: File, headers: Record<string, string>): Promise<void> => {
-    const contentType = file.type || 'application/octet-stream';
+  uploadFile: async (
+    url: string,
+    file: File,
+    headers: Record<string, string>,
+  ): Promise<void> => {
+    const contentType = file.type || "application/octet-stream";
     const uploadHeaders = new Headers();
     const signedHeaders = headers || {};
 
     Object.entries(signedHeaders).forEach(([key, value]) => {
       const normalized = key.toLowerCase();
-      if (normalized === 'host' || normalized === 'content-length') {
+      if (normalized === "host" || normalized === "content-length") {
         return;
       }
-      if (typeof value === 'string' && value.trim().length > 0) {
+      if (typeof value === "string" && value.trim().length > 0) {
         uploadHeaders.set(key, value);
       }
     });
 
-    if (!uploadHeaders.has('Content-Type')) {
-      uploadHeaders.set('Content-Type', contentType);
+    if (!uploadHeaders.has("Content-Type")) {
+      uploadHeaders.set("Content-Type", contentType);
     }
 
     const response = await fetch(url, {
-      method: 'PUT',
+      method: "PUT",
       headers: uploadHeaders,
       body: file,
-      mode: 'cors',
-      cache: 'no-store',
+      mode: "cors",
+      cache: "no-store",
       keepalive: true,
     });
 

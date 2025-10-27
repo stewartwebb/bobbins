@@ -385,7 +385,7 @@ func (c *Client) handleParticipantUpdate(raw json.RawMessage) {
 		Type: "participant.updated",
 		Data: map[string]interface{}{
 			"user_id":     participant.UserID,
-			"channel_id": participant.ChannelID,
+			"channel_id":  participant.ChannelID,
 			"media_state": participant.MediaState,
 			"session_id":  participant.SessionID,
 		},
@@ -545,10 +545,6 @@ func (h *Hub) broadcastToChannel(channelID uint, payload interface{}, excludeUse
 	h.mu.RUnlock()
 
 	for _, client := range clients {
-		if !client.webrtcActive || client.webrtcChannelID != channelID {
-			continue
-		}
-
 		if excludeUserID != 0 && client.userID == excludeUserID {
 			continue
 		}
