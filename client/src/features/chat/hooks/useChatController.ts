@@ -215,6 +215,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const [localMediaState, setLocalMediaState] = useState<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
   const [remoteMediaStreams, setRemoteMediaStreams] = useState<Record<number, MediaStream>>({});
   const [mediaPermissionError, setMediaPermissionError] = useState<string | null>(null);
+  const [channelParticipants, setChannelParticipants] = useState<Record<number, WebRTCParticipant[]>>({});
 
   const wsRef = useRef<WebSocket | null>(null);
   const selectedServerIdRef = useRef<number | null>(null);
@@ -1318,6 +1319,24 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         const sorted = normalizeChannelList(fetched ?? []);
         setChannels(sorted);
 
+        // Fetch channel participants
+        try {
+          const participantsData = await serversAPI.getChannelParticipants(selectedServer.id);
+          if (isMounted) {
+            const participantsMap: Record<number, WebRTCParticipant[]> = {};
+            for (const [channelIdStr, participants] of Object.entries(participantsData)) {
+              const channelId = parseInt(channelIdStr, 10);
+              participantsMap[channelId] = participants;
+            }
+            setChannelParticipants(participantsMap);
+          }
+        } catch (err) {
+          // Silently fail participant fetch - not critical
+          if (isMounted) {
+            setChannelParticipants({});
+          }
+        }
+
         if (sorted.length === 0) {
           setSelectedChannel(null);
           return;
@@ -1541,6 +1560,39 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               return next;
             });
 
+            // Update channel participants list for UI
+            setChannelParticipants((prev) => {
+              const currentParticipants = prev[channelId] || [];
+              const baseParticipant = currentParticipants.find((p) => p.user_id === userId);
+              
+              const incomingMedia =
+                typeof data.media_state === 'object' && data.media_state !== null
+                  ? (data.media_state as WebRTCMediaState)
+                  : undefined;
+
+              const participant: WebRTCParticipant = {
+                ...baseParticipant,
+                user_id: userId,
+                channel_id: channelId,
+                display_name:
+                  typeof data.display_name === 'string' && data.display_name.trim().length > 0
+                    ? (data.display_name as string)
+                    : baseParticipant?.display_name ?? `Member #${userId}`,
+                role: typeof data.role === 'string' ? (data.role as string) : baseParticipant?.role,
+                session_id: typeof data.session_id === 'string' ? (data.session_id as string) : baseParticipant?.session_id,
+                media_state: mergeMediaState(baseParticipant?.media_state, incomingMedia),
+                last_seen: typeof data.last_seen === 'string' ? (data.last_seen as string) : baseParticipant?.last_seen,
+                username: typeof data.username === 'string' ? (data.username as string) : baseParticipant?.username,
+                avatar: typeof data.avatar === 'string' ? (data.avatar as string) : baseParticipant?.avatar,
+              };
+
+              const updatedParticipants = upsertParticipant(currentParticipants, participant);
+              return {
+                ...prev,
+                [channelId]: updatedParticipants,
+              };
+            });
+
             const selfId = currentUserIdRef.current;
             if (selfId && selfId !== userId) {
               void getOrCreatePeerConnection(userId);
@@ -1589,6 +1641,20 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               };
               webrtcSessionRef.current = next;
               return next;
+            });
+
+            // Update channel participants list for UI
+            setChannelParticipants((prev) => {
+              const currentParticipants = prev[channelId] || [];
+              const updatedParticipants = removeParticipantById(currentParticipants, userId);
+              if (updatedParticipants.length === 0) {
+                const { [channelId]: _, ...rest } = prev;
+                return rest;
+              }
+              return {
+                ...prev,
+                [channelId]: updatedParticipants,
+              };
             });
 
             closePeerConnection(userId);
@@ -2930,6 +2996,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
         localMediaState,
         remoteMediaStreams,
         mediaPermissionError,
+        channelParticipants,
       },
       derived: {
         canManageChannels,

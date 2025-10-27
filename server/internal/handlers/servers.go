@@ -305,6 +305,102 @@ func GetServer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"server": serializeServer(server)}})
 }
 
+// GetServerChannelParticipants returns active WebRTC participants for all channels in a server.
+func GetServerChannelParticipants(c *gin.Context) {
+	db, ok := getDB(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database connection unavailable"})
+		return
+	}
+
+	claims, ok := getUserClaims(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	hub, ok := getWebSocketHub(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "websocket hub unavailable"})
+		return
+	}
+
+	serverIDParam := c.Param("serverID")
+	serverIDValue, err := strconv.ParseUint(serverIDParam, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid server id"})
+		return
+	}
+
+	if err := ensureServerMembership(db.WithContext(c), uint(serverIDValue), claims.UserID); err != nil {
+		switch err {
+		case errServerMembershipRequired:
+			c.JSON(http.StatusForbidden, gin.H{"error": "membership required"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify membership"})
+		}
+		return
+	}
+
+	var channels []models.Channel
+	if err := db.WithContext(c).
+		Where("server_id = ? AND type = ?", uint(serverIDValue), models.ChannelTypeAudio).
+		Find(&channels).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load channels"})
+		return
+	}
+
+	result := make(map[string]interface{})
+	for _, channel := range channels {
+		participants := hub.WebRTCParticipants(channel.ID)
+		if len(participants) > 0 {
+			serializedParticipants := make([]map[string]interface{}, 0, len(participants))
+			
+			userIDs := make([]uint, 0, len(participants))
+			for _, p := range participants {
+				userIDs = append(userIDs, p.UserID)
+			}
+
+			var users []models.User
+			if len(userIDs) > 0 {
+				if err := db.WithContext(c).
+					Select("id", "username", "avatar").
+					Where("id IN ?", userIDs).
+					Find(&users).Error; err != nil {
+					continue
+				}
+			}
+
+			userMap := make(map[uint]models.User)
+			for _, user := range users {
+				userMap[user.ID] = user
+			}
+
+			for _, participant := range participants {
+				user, ok := userMap[participant.UserID]
+				serialized := map[string]interface{}{
+					"user_id":      participant.UserID,
+					"display_name": participant.DisplayName,
+					"role":         participant.Role,
+					"session_id":   participant.SessionID,
+					"media_state":  participant.MediaState,
+					"channel_id":   participant.ChannelID,
+					"last_seen":    participant.LastSeen.Format(time.RFC3339),
+				}
+				if ok {
+					serialized["username"] = user.Username
+					serialized["avatar"] = user.Avatar
+				}
+				serializedParticipants = append(serializedParticipants, serialized)
+			}
+
+			result[fmt.Sprintf("%d", channel.ID)] = serializedParticipants
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": result})
+}
+
 func requireServerOwner(db *gorm.DB, serverID, userID uint) error {
 	var membership models.ServerMember
 	if err := db.Where("server_id = ? AND user_id = ?", serverID, userID).First(&membership).Error; err != nil {

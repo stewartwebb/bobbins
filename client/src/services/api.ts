@@ -85,6 +85,11 @@ export const serversAPI = {
     const response = await api.get(`/servers/${serverId}`);
     return response.data;
   },
+
+  getChannelParticipants: async (serverId: number): Promise<{ [channelId: string]: any[] }> => {
+    const response = await api.get<{ data: { [channelId: string]: any[] } }>(`/servers/${serverId}/participants`);
+    return response.data.data;
+  },
 };
 
 export const invitesAPI = {
