@@ -23,6 +23,9 @@ import {
   GetMessagesResponse,
   JoinWebRTCResponse,
   WebRTCParticipant,
+  PresignAvatarUploadRequest,
+  PresignAvatarUploadResponse,
+  SetAvatarRequest,
 } from '../types/index';
 
 export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080/api/v1';
@@ -213,6 +216,57 @@ export const buildWebSocketURL = (token: string): string => {
     console.warn('Failed to build websocket URL, falling back to default.', error);
     return `ws://localhost:8080/ws?token=${encodeURIComponent(token)}`;
   }
+};
+
+// Avatars API
+export const avatarsAPI = {
+  presignUserAvatarUpload: async (request: PresignAvatarUploadRequest): Promise<PresignAvatarUploadResponse> => {
+    const response = await api.post<{ data: PresignAvatarUploadResponse }>('/users/me/avatar/presign', request);
+    return response.data.data;
+  },
+
+  setUserAvatar: async (request: SetAvatarRequest): Promise<User> => {
+    const response = await api.post<{ message: string; data: { user: User } }>('/users/me/avatar', request);
+    return response.data.data.user;
+  },
+
+  deleteUserAvatar: async (): Promise<User> => {
+    const response = await api.delete<{ message: string; data: { user: User } }>('/users/me/avatar');
+    return response.data.data.user;
+  },
+
+  presignServerAvatarUpload: async (
+    serverId: number,
+    request: PresignAvatarUploadRequest
+  ): Promise<PresignAvatarUploadResponse> => {
+    const response = await api.post<{ data: PresignAvatarUploadResponse }>(
+      `/servers/${serverId}/avatar/presign`,
+      request
+    );
+    return response.data.data;
+  },
+
+  setServerAvatar: async (serverId: number, request: SetAvatarRequest): Promise<Server> => {
+    const response = await api.post<{ message: string; data: { server: Server } }>(
+      `/servers/${serverId}/avatar`,
+      request
+    );
+    return response.data.data.server;
+  },
+
+  deleteServerAvatar: async (serverId: number): Promise<Server> => {
+    const response = await api.delete<{ message: string; data: { server: Server } }>(`/servers/${serverId}/avatar`);
+    return response.data.data.server;
+  },
+
+  uploadFile: async (url: string, file: File, headers: Record<string, string>): Promise<void> => {
+    await axios.put(url, file, {
+      headers: {
+        ...headers,
+        'Content-Type': file.type,
+      },
+    });
+  },
 };
 
 export default api;
