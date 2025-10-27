@@ -97,7 +97,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
 
       if (isVideo) {
         return (
-          <div key={attachment.id} className="w-full max-w-full sm:mx-auto sm:max-w-3xl">
+          <div key={attachment.id} className="w-full max-w-3xl">
             <VideoAttachmentPlayer attachment={attachment} formatFileSize={formatFileSize} />
           </div>
         );
@@ -109,7 +109,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
             key={attachment.id}
             type="button"
             onClick={() => handlePreviewAttachment(attachment)}
-            className="group block w-full max-w-full overflow-hidden rounded-xl border border-slate-800/70 bg-slate-950/60 text-left shadow-sm shadow-slate-900/30 transition hover:border-primary-400/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 sm:mx-auto sm:max-w-3xl"
+            className="group block w-full max-w-3xl overflow-hidden rounded-xl border border-slate-800/70 bg-slate-950/60 text-left shadow-sm shadow-slate-900/30 transition hover:border-primary-400/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
           >
             <div className="flex max-h-[70vh] w-full items-center justify-center bg-slate-900/80">
               <img
@@ -133,7 +133,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
           href={attachment.url}
           target="_blank"
           rel="noreferrer"
-          className="flex w-full max-w-full items-center justify-between gap-4 rounded-lg border border-slate-800/70 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 transition hover:border-primary-400/60 hover:text-primary-100 sm:mx-auto sm:max-w-3xl"
+          className="flex w-full max-w-3xl items-center justify-between gap-4 rounded-lg border border-slate-800/70 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 transition hover:border-primary-400/60 hover:text-primary-100"
         >
           <div className="flex items-center gap-3">
             <span className="text-xl">📎</span>
@@ -442,13 +442,13 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
               )}
 
               {selectedChannel && selectedChannel.type === 'text' && !isLoadingMessages && groupedMessages.length > 0 && (
-                <div className="space-y-4">
+                <div className="space-y-2">
                   {groupedMessages.map((group) => {
                     const headerTimestamp = formatTimestamp(group.firstTimestamp);
 
                     return (
-                      <article key={group.key} className="group flex gap-3 rounded-lg px-3 py-2 transition hover:bg-slate-900/60">
-                        <div className="mt-1 flex h-10 w-10 items-center justify-center overflow-hidden rounded-md bg-slate-900 text-xs font-semibold text-primary-200">
+                      <article key={group.key} className="group flex gap-3 rounded-lg px-2 py-1 transition hover:bg-slate-900/60">
+                        <div className="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-md bg-slate-900 text-xs font-semibold text-primary-200">
                           {group.avatar ? (
                             <img src={group.avatar} alt={group.username} className="h-full w-full object-cover" />
                           ) : (
@@ -460,7 +460,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
                             <span className="font-semibold text-slate-100">{group.username}</span>
                             <span className="font-mono text-[11px] text-slate-500">{headerTimestamp}</span>
                           </div>
-                          <div className="mt-2 space-y-4 text-sm leading-relaxed text-slate-200">
+                          <div className="mt-1 space-y-2 text-sm leading-relaxed text-slate-200">
                             {group.messages.map((message, index) => {
                               const hasContent = Boolean(message.content && message.content.trim().length > 0);
                               const attachmentList = message.attachments ?? [];
