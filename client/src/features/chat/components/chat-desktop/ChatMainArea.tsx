@@ -35,6 +35,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
       isLoadingMessages,
       unreadMessageCount,
       uploadQueue,
+      pendingFiles,
       error,
       messageInput,
       wsStatus,
@@ -73,6 +74,7 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
       handleDragLeave,
       handleDrop,
       handlePaste,
+      handleRemovePendingFile,
       handleJumpToBottom,
       handleSendMessage,
       handleMessageChange,
@@ -572,6 +574,47 @@ const ChatMainArea: React.FC<ChatMainAreaProps> = ({ controller, onOpenNavigatio
                     </div>
                   );
                 })}
+              </div>
+            )}
+            {pendingFiles.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-slate-400">Pending attachments (press Enter to send):</div>
+                <div className="flex flex-wrap gap-2">
+                  {pendingFiles.map((pending) => {
+                    const isImage = pending.file.type.startsWith('image/');
+                    return (
+                      <div
+                        key={pending.id}
+                        className="group relative overflow-hidden rounded-lg border border-slate-800/70 bg-slate-950/70"
+                      >
+                        {isImage ? (
+                          <img
+                            src={pending.previewUrl}
+                            alt={pending.file.name}
+                            className="h-24 w-24 object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-24 w-24 items-center justify-center bg-slate-900/80 text-3xl">
+                            📎
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePendingFile(pending.id)}
+                          className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-red-500/90 text-white opacity-0 shadow-lg transition hover:bg-red-400 group-hover:opacity-100"
+                          aria-label="Remove file"
+                        >
+                          ✕
+                        </button>
+                        <div className="border-t border-slate-800/70 bg-slate-950/90 px-2 py-1 text-[10px] text-slate-400">
+                          <div className="truncate" title={pending.file.name}>
+                            {pending.file.name}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
             {typingIndicatorMessage && (
