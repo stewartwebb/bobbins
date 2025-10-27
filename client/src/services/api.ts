@@ -260,12 +260,36 @@ export const avatarsAPI = {
   },
 
   uploadFile: async (url: string, file: File, headers: Record<string, string>): Promise<void> => {
-    await axios.put(url, file, {
-      headers: {
-        ...headers,
-        'Content-Type': file.type,
-      },
+    const contentType = file.type || 'application/octet-stream';
+    const uploadHeaders = new Headers();
+    const signedHeaders = headers || {};
+
+    Object.entries(signedHeaders).forEach(([key, value]) => {
+      const normalized = key.toLowerCase();
+      if (normalized === 'host' || normalized === 'content-length') {
+        return;
+      }
+      if (typeof value === 'string' && value.trim().length > 0) {
+        uploadHeaders.set(key, value);
+      }
     });
+
+    if (!uploadHeaders.has('Content-Type')) {
+      uploadHeaders.set('Content-Type', contentType);
+    }
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: uploadHeaders,
+      body: file,
+      mode: 'cors',
+      cache: 'no-store',
+      keepalive: true,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upload failed with status ${response.status}`);
+    }
   },
 };
 
