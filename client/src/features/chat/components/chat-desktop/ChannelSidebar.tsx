@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ChatController } from '../../hooks/useChatController';
 import { IconMic, IconMicOff, IconPhone, IconVideo, IconVideoOff } from './Icons';
+import AvatarStack from './AvatarStack';
 
 const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }) => {
   const {
@@ -12,6 +13,7 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
       currentUser,
       localMediaState,
       webrtcState,
+      channelParticipants,
     },
     derived: {
       canManageChannels,
@@ -66,35 +68,39 @@ const ChannelSidebar: React.FC<{ controller: ChatController }> = ({ controller }
               webrtcState &&
               webrtcState.channelId === channel.id &&
               webrtcState.status === 'connected';
+            const participants = isAudioChannel ? (channelParticipants[channel.id] || []) : [];
+            const hasParticipants = participants.length > 0;
 
             return (
-              <button
-                key={channel.id}
-                type="button"
-                onClick={() => handleChannelSelect(channel)}
-                className={`flex w-full flex-col gap-1 rounded-lg px-3 py-2 text-left transition ${
-                  isActive
-                    ? 'border border-slate-700 bg-slate-900 text-primary-100 shadow-md shadow-slate-900/40'
-                    : 'text-slate-300 hover:bg-slate-900/70 hover:text-primary-100'
-                }`}
-              >
-                <span className="flex items-center gap-2 font-mono text-sm">
-                  <span className={isAudioChannel ? 'text-emerald-300' : 'text-primary-300'}>{prefix}</span>
-                  {channel.name}
-                </span>
-                {channel.description && (
-                  <span className="text-[11px] text-slate-500">{channel.description}</span>
-                )}
-                {isAudioChannel && (
-                  <span
-                    className={`text-[10px] uppercase tracking-[0.3em] ${
-                      isLiveAudio ? 'text-emerald-300' : 'text-emerald-300/70'
-                    }`}
-                  >
-                    {isLiveAudio ? 'live' : 'audio'}
+              <div key={channel.id} className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => handleChannelSelect(channel)}
+                  className={`flex w-full flex-col gap-1 rounded-lg px-3 py-2 text-left transition ${
+                    isActive
+                      ? 'border border-slate-700 bg-slate-900 text-primary-100 shadow-md shadow-slate-900/40'
+                      : 'text-slate-300 hover:bg-slate-900/70 hover:text-primary-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 font-mono text-sm">
+                    <span className={isAudioChannel ? 'text-emerald-300' : 'text-primary-300'}>{prefix}</span>
+                    {channel.name}
                   </span>
-                )}
-              </button>
+                  {channel.description && (
+                    <span className="text-[11px] text-slate-500">{channel.description}</span>
+                  )}
+                  {isAudioChannel && (
+                    <span
+                      className={`text-[10px] uppercase tracking-[0.3em] ${
+                        isLiveAudio ? 'text-emerald-300' : 'text-emerald-300/70'
+                      }`}
+                    >
+                      {isLiveAudio ? 'live' : 'audio'}
+                    </span>
+                  )}
+                </button>
+                {hasParticipants && <AvatarStack participants={participants} maxVisible={5} />}
+              </div>
             );
           })}
         {!isLoadingChannels && canManageChannels && selectedServer && (

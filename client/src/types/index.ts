@@ -233,6 +233,12 @@ export interface WebRTCParticipant {
   channel_id?: number;
   media_state?: WebRTCMediaState;
   last_seen?: string;
+  username?: string;
+  avatar?: string;
+}
+
+export interface ChannelParticipantsMap {
+  [channelId: string]: WebRTCParticipant[];
 }
 
 export interface JoinWebRTCResponse {

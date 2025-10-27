@@ -153,6 +153,7 @@ func main() {
 			protected.GET("/servers", handlers.GetServers)
 			protected.POST("/servers", handlers.CreateServer)
 			protected.GET("/servers/:serverID", handlers.GetServer)
+			protected.GET("/servers/:serverID/participants", handlers.GetServerChannelParticipants)
 			protected.POST("/servers/:serverID/invites", handlers.CreateServerInvite)
 
 			// Channel routes
