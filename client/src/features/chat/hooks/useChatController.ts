@@ -250,6 +250,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
   const localPreviewRef = useRef<HTMLVideoElement | null>(null);
   const localMediaStateRef = useRef<WebRTCMediaState>(DEFAULT_MEDIA_STATE);
   const remoteAudioElementsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
+  const selfLeaveSoundPlayedRef = useRef(false);
 
   const normalizeChannelList = useCallback(
     (list: Channel[]) =>
@@ -1057,6 +1058,14 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
       setWebrtcError(null);
       setIsJoiningWebRTC(false);
       teardownWebRTCSession();
+      if (!selfLeaveSoundPlayedRef.current) {
+        try {
+          notificationSounds.play('leave_channel');
+        } catch (playError) {
+          console.debug('Failed to play leave sound', playError);
+        }
+        selfLeaveSoundPlayedRef.current = true;
+      }
       return;
     }
 
@@ -1065,6 +1074,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
     setWebrtcError(null);
     setIsJoiningWebRTC(false);
     teardownWebRTCSession();
+
+    if (!selfLeaveSoundPlayedRef.current) {
+      try {
+        notificationSounds.play('leave_channel');
+      } catch (playError) {
+        console.debug('Failed to play leave sound', playError);
+      }
+      selfLeaveSoundPlayedRef.current = true;
+    }
 
     sendWebSocketMessage({
       type: 'session.leave',
@@ -1456,6 +1474,7 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
                 error: undefined,
               };
               webrtcSessionRef.current = next;
+              selfLeaveSoundPlayedRef.current = false;
               // Play a join sound when we successfully connect our own audio session
               try {
                 notificationSounds.play('join_channel');
@@ -1612,13 +1631,15 @@ export const useChatController = (options: UseChatControllerOptions = {}) => {
               pendingWebRTCAuthRef.current = null;
               webrtcSessionRef.current = null;
               teardownWebRTCSession();
-              // Play a leave sound when the current user is removed (left) from the audio channel
-              try {
-                notificationSounds.play('leave_channel');
-              } catch (playError) {
-                console.debug('Failed to play leave sound', playError);
+              if (!selfLeaveSoundPlayedRef.current) {
+                // Play leave sound when the server kicks us (e.g., disconnect) and we haven't already played locally
+                try {
+                  notificationSounds.play('leave_channel');
+                } catch (playError) {
+                  console.debug('Failed to play leave sound', playError);
+                }
               }
-
+              selfLeaveSoundPlayedRef.current = false;
               setWebrtcError((current) => current ?? 'You left the audio channel.');
             } else {
               // Play leave sound when someone else leaves
