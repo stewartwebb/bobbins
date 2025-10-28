@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -73,7 +74,49 @@ func main() {
 	go hub.Run()
 
 	// Initialize WebRTC signaling manager and config
-	rtcManager := webrtc.NewManager(2 * time.Minute)
+	rtcStoreCfg := webrtc.RedisStoreConfigFromEnv()
+	var (
+		rtcStore       webrtc.TokenStore
+		rtcRedisClient *redis.Client
+	)
+
+	if rtcStoreCfg.Addr != "" {
+		rtcRedisClient = redis.NewClient(&redis.Options{
+			Addr:     rtcStoreCfg.Addr,
+			Password: rtcStoreCfg.Password,
+			DB:       rtcStoreCfg.DB,
+		})
+
+		if err := rtcRedisClient.Ping(context.Background()).Err(); err != nil {
+			log.Printf("WebRTC Redis store disabled: %v", err)
+			if closeErr := rtcRedisClient.Close(); closeErr != nil {
+				log.Printf("Failed to close Redis client: %v", closeErr)
+			}
+			rtcRedisClient = nil
+		} else {
+			store, storeErr := webrtc.NewRedisTokenStore(rtcRedisClient, rtcStoreCfg.Prefix)
+			if storeErr != nil {
+				log.Printf("WebRTC Redis store unavailable: %v", storeErr)
+				if closeErr := rtcRedisClient.Close(); closeErr != nil {
+					log.Printf("Failed to close Redis client: %v", closeErr)
+				}
+				rtcRedisClient = nil
+			} else {
+				rtcStore = store
+				log.Println("WebRTC session tokens stored in Redis")
+			}
+		}
+	}
+
+	if rtcRedisClient != nil {
+		defer func() {
+			if err := rtcRedisClient.Close(); err != nil {
+				log.Printf("Failed to close Redis client: %v", err)
+			}
+		}()
+	}
+
+	rtcManager := webrtc.NewManagerWithStore(2*time.Minute, rtcStore)
 	rtcConfig := webrtc.ConfigFromEnv()
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
