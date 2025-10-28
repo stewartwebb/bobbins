@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -325,7 +326,20 @@ func (c *Client) handleSessionAuthenticate(raw json.RawMessage) {
 
 	session, err := c.webrtcManager.Validate(payload.SessionToken, c.userID, payload.ChannelID)
 	if err != nil {
-		c.sendError("session.invalid", "failed to validate session token")
+		// Provide more specific error codes so clients (and logs) can
+		// differentiate not-found / expired / mismatch cases during
+		// debugging. Keep user-facing messages general enough for
+		// production use.
+		switch {
+		case errors.Is(err, webrtc.ErrTokenNotFound):
+			c.sendError("session.not_found", "session token not found")
+		case errors.Is(err, webrtc.ErrTokenExpired):
+			c.sendError("session.expired", "session token expired")
+		case errors.Is(err, webrtc.ErrTokenMismatch):
+			c.sendError("session.mismatch", "session token does not match user/channel")
+		default:
+			c.sendError("session.invalid", "failed to validate session token")
+		}
 		return
 	}
 

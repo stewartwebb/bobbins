@@ -4,7 +4,6 @@ import (
     "crypto/rand"
     "encoding/base64"
     "errors"
-    "fmt"
     "sync"
     "time"
 )
@@ -33,6 +32,9 @@ var (
     ErrTokenNotFound = errors.New("webrtc session token not found")
     // ErrTokenExpired signals a token has expired.
     ErrTokenExpired = errors.New("webrtc session token expired")
+    // ErrTokenMismatch signals the token exists but is not valid for the
+    // provided user/channel pair (user or channel mismatch).
+    ErrTokenMismatch = errors.New("webrtc session token mismatch")
 )
 
 // NewManager constructs a Manager with the provided TTL for issued tokens.
@@ -92,7 +94,7 @@ func (m *Manager) Validate(token string, expectedUserID, expectedChannelID uint)
     }
 
     if session.UserID != expectedUserID || session.ChannelID != expectedChannelID {
-        return SessionToken{}, fmt.Errorf("session token mismatch")
+        return SessionToken{}, ErrTokenMismatch
     }
 
     return session, nil
